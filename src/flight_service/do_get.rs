@@ -1,3 +1,4 @@
+use crate::composed_extension_codec::ComposedPhysicalExtensionCodec;
 use crate::flight_service::service::ArrowFlightEndpoint;
 use crate::plan::ArrowFlightReadExecProtoCodec;
 use crate::stage_delegation::{ActorContext, StageContext};
@@ -75,10 +76,11 @@ impl ArrowFlightEndpoint {
 
         let DoGetInner::RemotePlanExec(action) = action;
 
-        let mut state = SessionStateBuilder::new()
+        let state_builder = SessionStateBuilder::new()
             .with_runtime_env(Arc::clone(&self.runtime))
-            .with_default_features()
-            .build();
+            .with_default_features();
+
+        let mut state = self.session_builder.on_new_session(state_builder).build();
 
         let Some(function_registry) = state.function_registry() else {
             return invalid_argument("FunctionRegistry not present in newly built SessionState");
@@ -96,13 +98,12 @@ impl ArrowFlightEndpoint {
             return invalid_argument("RemotePlanExec is missing the actor context");
         };
 
+        let mut codec = ComposedPhysicalExtensionCodec::default();
+        codec.push(ArrowFlightReadExecProtoCodec::new(&self.runtime));
+        codec.push_from_config(state.config());
+
         let plan = plan_proto
-            .try_into_physical_plan(
-                function_registry,
-                &self.runtime,
-                // TODO: The user should be able to pass its own extension decoder.
-                &ArrowFlightReadExecProtoCodec::new(&self.runtime),
-            )
+            .try_into_physical_plan(function_registry, &self.runtime, &codec)
             .map_err(|err| Status::internal(format!("Cannot deserialize plan: {err}")))?;
 
         let stage_id = stage_context.id.clone();
@@ -113,8 +114,7 @@ impl ArrowFlightEndpoint {
             stage_context.partitioning.as_ref(),
             function_registry,
             &plan.schema(),
-            // TODO: The user should be able to pass its own extension decoder.
-            &ArrowFlightReadExecProtoCodec::new(&self.runtime),
+            &codec,
         ) {
             // We need to replace the partition count in the provided Partitioning scheme with
             // the number of actors in the previous stage. ArrowFlightReadExec might be declaring
@@ -139,12 +139,7 @@ impl ArrowFlightEndpoint {
 
         let stream_partitioner = self
             .partitioner_registry
-            .get_or_create_stream_partitioner(
-                stage_id,
-                actor_idx,
-                plan,
-                partitioning,
-            )
+            .get_or_create_stream_partitioner(stage_id, actor_idx, plan, partitioning)
             .map_err(|err| {
                 Status::internal(format!("Could not create stream partitioner: {err}"))
             })?;

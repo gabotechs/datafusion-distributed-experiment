@@ -1,4 +1,5 @@
 use crate::channel_manager::{ArrowFlightChannel, ChannelManager};
+use crate::composed_extension_codec::ComposedPhysicalExtensionCodec;
 use crate::flight_service::{DoGet, DoPut};
 use crate::plan::arrow_flight_read_proto::ArrowFlightReadExecProtoCodec;
 use crate::stage_delegation::{ActorContext, StageContext, StageDelegation};
@@ -171,6 +172,10 @@ impl ExecutionPlan for ArrowFlightReadExec {
                 return internal_err!("Invalid channel index {partition} with a total number of {} channels", channels.len());
             }
 
+            let mut codec = ComposedPhysicalExtensionCodec::default();
+            codec.push(ArrowFlightReadExecProtoCodec::new(&context.runtime_env()));
+            codec.push_from_config(context.session_config());
+
             let ticket = DoGet::new_remote_plan_exec_ticket(
                 plan,
                 next_stage_context.clone(),
@@ -178,8 +183,7 @@ impl ExecutionPlan for ArrowFlightReadExec {
                     caller_actor_idx: current_actor.actor_idx,
                     actor_idx: partition as u64,
                 },
-                // TODO: The user should be able to pass its own extension decoder.
-                &ArrowFlightReadExecProtoCodec::new(&runtime),
+                &codec
             )?;
 
             let mut client = FlightServiceClient::new(channels[partition].channel.clone());

@@ -3,7 +3,7 @@ mod common;
 #[cfg(test)]
 mod tests {
     use crate::assert_snapshot;
-    use crate::common::localhost::start_localhost_context;
+    use crate::common::localhost::{start_localhost_context, NoopSessionBuilder};
     use crate::common::parquet::register_parquet_tables;
     use datafusion::physical_expr::Partitioning;
     use datafusion::physical_plan::{displayable, execute_stream};
@@ -16,7 +16,7 @@ mod tests {
     async fn highly_distributed_query() -> Result<(), Box<dyn Error>> {
         let (ctx, _guard) = start_localhost_context([
             50050, 50051, 50053, 50054, 50055, 50056, 50057, 50058, 50059,
-        ])
+        ], NoopSessionBuilder)
         .await;
         register_parquet_tables(&ctx).await?;
 

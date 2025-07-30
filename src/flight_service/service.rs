@@ -1,6 +1,9 @@
 use crate::channel_manager::ChannelManager;
+use crate::flight_service::session_builder::NoopSessionBuilder;
 use crate::flight_service::stream_partitioner_registry::StreamPartitionerRegistry;
+use crate::flight_service::SessionBuilder;
 use crate::stage_delegation::StageDelegation;
+use crate::ChannelResolver;
 use arrow_flight::flight_service_server::FlightService;
 use arrow_flight::{
     Action, ActionType, Criteria, Empty, FlightData, FlightDescriptor, FlightInfo,
@@ -11,13 +14,13 @@ use datafusion::execution::runtime_env::RuntimeEnv;
 use futures::stream::BoxStream;
 use std::sync::Arc;
 use tonic::{Request, Response, Status, Streaming};
-use crate::ChannelResolver;
 
 pub struct ArrowFlightEndpoint {
     pub(super) channel_manager: Arc<ChannelManager>,
     pub(super) stage_delegation: Arc<StageDelegation>,
     pub(super) runtime: Arc<RuntimeEnv>,
     pub(super) partitioner_registry: Arc<StreamPartitionerRegistry>,
+    pub(super) session_builder: Arc<dyn SessionBuilder + Send + Sync>,
 }
 
 impl ArrowFlightEndpoint {
@@ -27,7 +30,15 @@ impl ArrowFlightEndpoint {
             stage_delegation: Arc::new(StageDelegation::default()),
             runtime: Arc::new(RuntimeEnv::default()),
             partitioner_registry: Arc::new(StreamPartitionerRegistry::default()),
+            session_builder: Arc::new(NoopSessionBuilder),
         }
+    }
+
+    pub fn with_session_builder(
+        &mut self,
+        session_builder: impl SessionBuilder + Send + Sync + 'static,
+    ) {
+        self.session_builder = Arc::new(session_builder);
     }
 }
 

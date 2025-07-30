@@ -13,7 +13,20 @@ use std::sync::Arc;
 // Idea taken from
 // https://github.com/apache/datafusion/blob/0eebc0c7c0ffcd1514f5c6d0f8e2b6d0c69a07f5/datafusion-examples/examples/composed_extension_codec.rs#L236-L291
 
+/// Trait that mimics DataFusion's [PhysicalExtensionCodec] where each method accepts a last
+/// argument with a [PhysicalExtensionCodec]. 
+///
+/// This allows composing multiple [PhysicalExtensionCodecExt] into one single 
+/// [ComposedPhysicalExtensionCodec] that can be used as a central [PhysicalExtensionCodec]
+/// implementation that is capable of encoding/decoding not only this project's specific
+/// plans, but also any other user-provided plan.
+/// 
+/// [PhysicalExtensionCodecExt] implementations will be able to pass down this 
+/// centralized [PhysicalExtensionCodec] so that children can also make use of all the codecs 
+/// available in it for encoding/decoding themselves and their children.
 pub trait PhysicalExtensionCodecExt: Debug + Send + Sync {
+    /// Same as [PhysicalExtensionCodec::try_decode], but accepting a centralized [PhysicalExtensionCodec]
+    /// as its last argument.
     fn try_decode(
         &self,
         _buf: &[u8],
@@ -24,6 +37,8 @@ pub trait PhysicalExtensionCodecExt: Debug + Send + Sync {
         not_impl_err!("try_decode not implemented for {self:?}")
     }
 
+    /// Same as [PhysicalExtensionCodec::try_encode], but accepting a centralized [PhysicalExtensionCodec]
+    /// as its last argument.
     fn try_encode(
         &self,
         _node: Arc<dyn ExecutionPlan>,
@@ -33,6 +48,8 @@ pub trait PhysicalExtensionCodecExt: Debug + Send + Sync {
         not_impl_err!("try_encode not implemented for {self:?}")
     }
 
+    /// Same as [PhysicalExtensionCodec::try_decode_udf], but accepting a centralized [PhysicalExtensionCodec]
+    /// as its last argument.
     fn try_decode_udf(
         &self,
         _name: &str,
@@ -42,6 +59,8 @@ pub trait PhysicalExtensionCodecExt: Debug + Send + Sync {
         not_impl_err!("try_decode_udf not implemented for {self:?}")
     }
 
+    /// Same as [PhysicalExtensionCodec::try_encode_udf], but accepting a centralized [PhysicalExtensionCodec]
+    /// as its last argument.
     fn try_encode_udf(
         &self,
         _node: &ScalarUDF,
@@ -51,6 +70,8 @@ pub trait PhysicalExtensionCodecExt: Debug + Send + Sync {
         Ok(())
     }
 
+    /// Same as [PhysicalExtensionCodec::try_decode_expr], but accepting a centralized [PhysicalExtensionCodec]
+    /// as its last argument.
     fn try_decode_expr(
         &self,
         _buf: &[u8],
@@ -60,6 +81,8 @@ pub trait PhysicalExtensionCodecExt: Debug + Send + Sync {
         not_impl_err!("try_decode_expr not implemented for {self:?}")
     }
 
+    /// Same as [PhysicalExtensionCodec::try_encode_expr], but accepting a centralized [PhysicalExtensionCodec]
+    /// as its last argument.
     fn try_encode_expr(
         &self,
         _node: &Arc<dyn PhysicalExpr>,
@@ -69,6 +92,8 @@ pub trait PhysicalExtensionCodecExt: Debug + Send + Sync {
         not_impl_err!("try_encode_expr not implemented for {self:?}")
     }
 
+    /// Same as [PhysicalExtensionCodec::try_decode_udaf], but accepting a centralized [PhysicalExtensionCodec]
+    /// as its last argument.
     fn try_decode_udaf(
         &self,
         _name: &str,
@@ -78,6 +103,8 @@ pub trait PhysicalExtensionCodecExt: Debug + Send + Sync {
         not_impl_err!("try_decode_udaf not implemented for {self:?}")
     }
 
+    /// Same as [PhysicalExtensionCodec::try_encode_udaf], but accepting a centralized [PhysicalExtensionCodec]
+    /// as its last argument.
     fn try_encode_udaf(
         &self,
         _node: &AggregateUDF,
@@ -87,6 +114,8 @@ pub trait PhysicalExtensionCodecExt: Debug + Send + Sync {
         Ok(())
     }
 
+    /// Same as [PhysicalExtensionCodec::try_decode_udwf], but accepting a centralized [PhysicalExtensionCodec]
+    /// as its last argument.
     fn try_decode_udwf(
         &self,
         _name: &str,
@@ -96,6 +125,8 @@ pub trait PhysicalExtensionCodecExt: Debug + Send + Sync {
         not_impl_err!("try_decode_udwf not implemented for {self:?}")
     }
 
+    /// Same as [PhysicalExtensionCodec::try_encode_udwf], but accepting a centralized [PhysicalExtensionCodec]
+    /// as its last argument.
     fn try_encode_udwf(
         &self,
         _node: &WindowUDF,
@@ -106,18 +137,44 @@ pub trait PhysicalExtensionCodecExt: Debug + Send + Sync {
     }
 }
 
-/// A PhysicalExtensionCodec that tries one of multiple inner codecs
-/// until one works
+/// A [PhysicalExtensionCodec] that holds multiple [PhysicalExtensionCodecExt] and tries them
+/// sequentially until one works.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct ComposedPhysicalExtensionCodec {
     codecs: Vec<Arc<dyn PhysicalExtensionCodecExt>>,
 }
 
 impl ComposedPhysicalExtensionCodec {
+    /// Adds a new [PhysicalExtensionCodecExt] to the list. These codecs will be tried
+    /// sequentially until one works.
     pub(crate) fn push(&mut self, codec: impl PhysicalExtensionCodecExt + 'static) {
         self.codecs.push(Arc::new(codec));
     }
 
+    /// Adds a new [PhysicalExtensionCodecExt] from DataFusion's [SessionConfig] extensions.
+    /// 
+    /// If users have a custom [PhysicalExtensionCodecExt] for their own nodes, they should
+    /// populate the config extensions with a [PhysicalExtensionCodecExt] so that we can use
+    /// it while encoding/decoding plans to/from protobuf.
+    /// 
+    /// Example:
+    /// ```rust
+    /// # use std::sync::Arc;
+    /// # use datafusion::prelude::SessionConfig;
+    /// # use datafusion_distributed_experiment::PhysicalExtensionCodecExt;
+    ///
+    /// #[derive(Debug)]
+    /// struct CustomUserCodec {}
+    ///
+    /// impl PhysicalExtensionCodecExt for CustomUserCodec {
+    ///     // custom encoding/decoding logic
+    /// }
+    ///
+    /// let mut config = SessionConfig::new();
+    ///
+    /// let codec: Arc<dyn PhysicalExtensionCodecExt> = Arc::new(CustomUserCodec {});
+    /// config.set_extension(Arc::new(codec));
+    /// ```
     pub(crate) fn push_from_config(&mut self, config: &SessionConfig) {
         if let Some(user_codec) = config.get_extension::<Arc<dyn PhysicalExtensionCodecExt>>() {
             self.codecs.push(user_codec.as_ref().clone());

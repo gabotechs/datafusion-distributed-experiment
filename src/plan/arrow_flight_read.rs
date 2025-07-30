@@ -172,8 +172,8 @@ impl ExecutionPlan for ArrowFlightReadExec {
             }
 
             let mut codec = ComposedPhysicalExtensionCodec::default();
-            codec.push_from_config(context.session_config());
             codec.push(ArrowFlightReadExecProtoCodec::new(&context.runtime_env()));
+            codec.push_from_config(context.session_config());
 
             let ticket = DoGet::new_remote_plan_exec_ticket(
                 plan,

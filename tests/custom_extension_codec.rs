@@ -34,47 +34,10 @@ mod tests {
     use std::any::Any;
     use std::fmt::Formatter;
     use std::sync::Arc;
+    use datafusion::physical_plan::repartition::RepartitionExec;
 
     #[tokio::test]
     async fn custom_extension_codec() -> Result<(), Box<dyn std::error::Error>> {
-        fn build_plan(distributed: bool) -> Result<Arc<dyn ExecutionPlan>, DataFusionError> {
-            let mut plan: Arc<dyn ExecutionPlan> =
-                Arc::new(Int64ListExec::new(vec![1, 2, 3, 4, 5, 6]));
-
-            plan = Arc::new(FilterExec::try_new(
-                Arc::new(BinaryExpr::new(
-                    col("numbers", &plan.schema())?,
-                    Operator::Gt,
-                    lit(1i64),
-                )),
-                plan,
-            )?);
-
-            if distributed {
-                plan = Arc::new(ArrowFlightReadExec::new(
-                    plan.clone(),
-                    Partitioning::Hash(vec![col("numbers", &plan.schema())?], 1),
-                ));
-            }
-
-            plan = Arc::new(SortExec::new(
-                LexOrdering::new(vec![PhysicalSortExpr::new(
-                    col("numbers", &plan.schema())?,
-                    SortOptions::new(true, false),
-                )]),
-                plan,
-            ));
-
-            if distributed {
-                plan = Arc::new(ArrowFlightReadExec::new(
-                    plan.clone(),
-                    Partitioning::RoundRobinBatch(10),
-                ));
-            }
-
-            Ok(plan)
-        }
-
         #[derive(Clone)]
         struct CustomSessionBuilder;
         impl SessionBuilder for CustomSessionBuilder {
@@ -108,11 +71,13 @@ mod tests {
         let distributed_plan = build_plan(true)?;
 
         assert_snapshot!(displayable(distributed_plan.as_ref()).indent(true).to_string(), @r"
-        ArrowFlightReadExec: input_actors=10
-          SortExec: expr=[numbers@0 DESC NULLS LAST], preserve_partitioning=[false]
-            ArrowFlightReadExec: input_actors=1 hash=[numbers@0]
-              FilterExec: numbers@0 > 1
-                Int64ListExec: length=6
+        SortExec: expr=[numbers@0 DESC NULLS LAST], preserve_partitioning=[false]
+          RepartitionExec: partitioning=RoundRobinBatch(1), input_partitions=10
+            ArrowFlightReadExec: input_actors=10
+              SortExec: expr=[numbers@0 DESC NULLS LAST], preserve_partitioning=[false]
+                ArrowFlightReadExec: input_actors=1 hash=[numbers@0]
+                  FilterExec: numbers@0 > 1
+                    Int64ListExec: length=6
         ");
 
         let stream = execute_stream(single_node_plan, ctx.task_ctx())?;
@@ -145,6 +110,57 @@ mod tests {
         +---------+
         ");
         Ok(())
+    }
+
+    fn build_plan(distributed: bool) -> Result<Arc<dyn ExecutionPlan>, DataFusionError> {
+        let mut plan: Arc<dyn ExecutionPlan> =
+            Arc::new(Int64ListExec::new(vec![1, 2, 3, 4, 5, 6]));
+
+        plan = Arc::new(FilterExec::try_new(
+            Arc::new(BinaryExpr::new(
+                col("numbers", &plan.schema())?,
+                Operator::Gt,
+                lit(1i64),
+            )),
+            plan,
+        )?);
+
+        if distributed {
+            plan = Arc::new(ArrowFlightReadExec::new(
+                plan.clone(),
+                Partitioning::Hash(vec![col("numbers", &plan.schema())?], 1),
+            ));
+        }
+
+        plan = Arc::new(SortExec::new(
+            LexOrdering::new(vec![PhysicalSortExpr::new(
+                col("numbers", &plan.schema())?,
+                SortOptions::new(true, false),
+            )]),
+            plan,
+        ));
+
+        if distributed {
+            plan = Arc::new(ArrowFlightReadExec::new(
+                plan.clone(),
+                Partitioning::RoundRobinBatch(10),
+            ));
+
+            plan = Arc::new(RepartitionExec::try_new(
+                plan,
+                Partitioning::RoundRobinBatch(1),
+            )?);
+
+            plan = Arc::new(SortExec::new(
+                LexOrdering::new(vec![PhysicalSortExpr::new(
+                    col("numbers", &plan.schema())?,
+                    SortOptions::new(true, false),
+                )]),
+                plan,
+            ));
+        }
+
+        Ok(plan)
     }
 
     #[derive(Debug)]

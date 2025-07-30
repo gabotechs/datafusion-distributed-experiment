@@ -99,8 +99,8 @@ impl ArrowFlightEndpoint {
         };
 
         let mut codec = ComposedPhysicalExtensionCodec::default();
-        codec.push_from_config(state.config());
         codec.push(ArrowFlightReadExecProtoCodec::new(&self.runtime));
+        codec.push_from_config(state.config());
 
         let plan = plan_proto
             .try_into_physical_plan(function_registry, &self.runtime, &codec)

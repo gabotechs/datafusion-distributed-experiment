@@ -144,14 +144,13 @@ impl ArrowFlightEndpoint {
                 actor_idx,
                 plan,
                 partitioning,
-                state.task_ctx(),
             )
             .map_err(|err| {
                 Status::internal(format!("Could not create stream partitioner: {err}"))
             })?;
 
         let stream = stream_partitioner
-            .stream_partition(caller_actor_idx)
+            .execute(caller_actor_idx, state.task_ctx())
             .map_err(|err| Status::internal(format!("Cannot get stream partition: {err}")))?;
 
         // TODO: error propagation

@@ -13,24 +13,30 @@ pub trait SessionBuilder {
     ///
     /// # use std::sync::Arc;
     /// # use datafusion::execution::runtime_env::RuntimeEnv;
-    /// # use datafusion::execution::SessionStateBuilder;
-    /// # use datafusion_distributed_experiment::{PhysicalExtensionCodecExt, SessionBuilder};
+    /// # use datafusion::execution::{FunctionRegistry, SessionStateBuilder};
+    /// # use datafusion::physical_plan::ExecutionPlan;
+    /// # use datafusion_proto::physical_plan::PhysicalExtensionCodec;
+    /// # use datafusion_distributed_experiment::{SessionBuilder};
     ///
     /// #[derive(Debug)]
-    /// struct CustomExecCodec {
-    ///   runtime: Arc<RuntimeEnv>,
+    /// struct CustomExecCodec;
+    ///
+    /// impl PhysicalExtensionCodec for CustomExecCodec {
+    ///     fn try_decode(&self, buf: &[u8], inputs: &[Arc<dyn ExecutionPlan>], registry: &dyn FunctionRegistry) -> datafusion::common::Result<Arc<dyn ExecutionPlan>> {
+    ///         todo!()
+    ///     }
+    ///
+    ///     fn try_encode(&self, node: Arc<dyn ExecutionPlan>, buf: &mut Vec<u8>) -> datafusion::common::Result<()> {
+    ///         todo!()
+    ///     }
     /// }
     ///
     /// #[derive(Clone)]
     /// struct CustomSessionBuilder;
     /// impl SessionBuilder for CustomSessionBuilder {
     ///     fn on_new_session(&self, mut builder: SessionStateBuilder) -> SessionStateBuilder {
-    ///         let runtime = builder.runtime_env().get_or_insert_default();
     ///         let config = builder.config().get_or_insert_default();
-    ///
-    ///         let codec: Arc<dyn PhysicalExtensionCodecExt> = Arc::new(CustomExecCodec {
-    ///             runtime: runtime.clone()
-    ///         });
+    ///         let codec: Arc<dyn PhysicalExtensionCodec> = Arc::new(CustomExecCodec);
     ///         config.set_extension(Arc::new(codec));
     ///         builder
     ///     }

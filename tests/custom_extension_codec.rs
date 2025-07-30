@@ -10,7 +10,6 @@ mod tests {
     use datafusion::arrow::record_batch::RecordBatch;
     use datafusion::arrow::util::pretty::pretty_format_batches;
     use datafusion::error::DataFusionError;
-    use datafusion::execution::runtime_env::RuntimeEnv;
     use datafusion::execution::{
         FunctionRegistry, SendableRecordBatchStream, SessionStateBuilder, TaskContext,
     };
@@ -21,20 +20,21 @@ mod tests {
     };
     use datafusion::physical_plan::execution_plan::{Boundedness, EmissionType};
     use datafusion::physical_plan::filter::FilterExec;
+    use datafusion::physical_plan::repartition::RepartitionExec;
     use datafusion::physical_plan::sorts::sort::SortExec;
     use datafusion::physical_plan::stream::RecordBatchStreamAdapter;
-    use datafusion::physical_plan::{displayable, execute_stream, DisplayAs, DisplayFormatType, ExecutionPlan, PlanProperties};
-    use datafusion_distributed_experiment::{ArrowFlightReadExec, PhysicalExtensionCodecExt, SessionBuilder};
-    use datafusion_proto::physical_plan::{AsExecutionPlan, PhysicalExtensionCodec};
+    use datafusion::physical_plan::{
+        displayable, execute_stream, DisplayAs, DisplayFormatType, ExecutionPlan, PlanProperties,
+    };
+    use datafusion_distributed_experiment::{ArrowFlightReadExec, SessionBuilder};
+    use datafusion_proto::physical_plan::PhysicalExtensionCodec;
     use datafusion_proto::protobuf::proto_error;
     use futures::{stream, TryStreamExt};
     use insta::assert_snapshot;
-    use prost::bytes::BufMut;
     use prost::Message;
     use std::any::Any;
     use std::fmt::Formatter;
     use std::sync::Arc;
-    use datafusion::physical_plan::repartition::RepartitionExec;
 
     #[tokio::test]
     async fn custom_extension_codec() -> Result<(), Box<dyn std::error::Error>> {
@@ -42,9 +42,7 @@ mod tests {
         struct CustomSessionBuilder;
         impl SessionBuilder for CustomSessionBuilder {
             fn on_new_session(&self, mut builder: SessionStateBuilder) -> SessionStateBuilder {
-                let runtime_env = builder.runtime_env().get_or_insert_default();
-                let codec: Arc<dyn PhysicalExtensionCodecExt> =
-                    Arc::new(Int64ListExecCodec::new(runtime_env.clone()));
+                let codec: Arc<dyn PhysicalExtensionCodec> = Arc::new(Int64ListExecCodec);
                 let config = builder.config().get_or_insert_default();
                 config.set_extension(Arc::new(codec));
                 builder
@@ -54,8 +52,7 @@ mod tests {
         let (ctx, _guard) =
             start_localhost_context([50050, 50051, 50052], CustomSessionBuilder).await;
 
-        let codec: Arc<dyn PhysicalExtensionCodecExt> =
-            Arc::new(Int64ListExecCodec::new(ctx.runtime_env()));
+        let codec: Arc<dyn PhysicalExtensionCodec> = Arc::new(Int64ListExecCodec);
         ctx.state_ref()
             .write()
             .config_mut()
@@ -113,8 +110,7 @@ mod tests {
     }
 
     fn build_plan(distributed: bool) -> Result<Arc<dyn ExecutionPlan>, DataFusionError> {
-        let mut plan: Arc<dyn ExecutionPlan> =
-            Arc::new(Int64ListExec::new(vec![1, 2, 3, 4, 5, 6]));
+        let mut plan: Arc<dyn ExecutionPlan> = Arc::new(Int64ListExec::new(vec![1, 2, 3, 4, 5, 6]));
 
         plan = Arc::new(FilterExec::try_new(
             Arc::new(BinaryExpr::new(
@@ -231,40 +227,7 @@ mod tests {
     }
 
     #[derive(Debug)]
-    struct Int64ListExecCodec {
-        runtime: Arc<RuntimeEnv>,
-    }
-
-    impl Int64ListExecCodec {
-        fn new(runtime: Arc<RuntimeEnv>) -> Self {
-            Self { runtime }
-        }
-    }
-
-    impl PhysicalExtensionCodecExt for Int64ListExecCodec {
-        fn try_decode(
-            &self,
-            buf: &[u8],
-            _: &[Arc<dyn ExecutionPlan>],
-            registry: &dyn FunctionRegistry,
-            codec: &dyn PhysicalExtensionCodec
-        ) -> datafusion::common::Result<Arc<dyn ExecutionPlan>> {
-            Int64ListExecProto::try_decode(buf)?.try_into_physical_plan(
-                registry,
-                &self.runtime,
-                codec,
-            )
-        }
-
-        fn try_encode(
-            &self,
-            node: Arc<dyn ExecutionPlan>,
-            buf: &mut Vec<u8>,
-            codec: &dyn PhysicalExtensionCodec
-        ) -> datafusion::common::Result<()> {
-            Int64ListExecProto::try_from_physical_plan(node, codec)?.try_encode(buf)
-        }
-    }
+    struct Int64ListExecCodec;
 
     #[derive(Clone, PartialEq, ::prost::Message)]
     struct Int64ListExecProto {
@@ -272,45 +235,34 @@ mod tests {
         numbers: Vec<i64>,
     }
 
-    impl AsExecutionPlan for Int64ListExecProto {
-        fn try_decode(buf: &[u8]) -> datafusion::common::Result<Self>
-        where
-            Self: Sized,
-        {
-            Int64ListExecProto::decode(buf).map_err(|err| proto_error(format!("{err}")))
-        }
-
-        fn try_encode<B>(&self, buf: &mut B) -> datafusion::common::Result<()>
-        where
-            B: BufMut,
-            Self: Sized,
-        {
-            self.encode(buf)
-                .map_err(|err| proto_error(format!("{err}")))
-        }
-
-        fn try_into_physical_plan(
+    impl PhysicalExtensionCodec for Int64ListExecCodec {
+        fn try_decode(
             &self,
-            _: &dyn FunctionRegistry,
-            _: &RuntimeEnv,
-            _: &dyn PhysicalExtensionCodec,
+            buf: &[u8],
+            _: &[Arc<dyn ExecutionPlan>],
+            _registry: &dyn FunctionRegistry,
         ) -> datafusion::common::Result<Arc<dyn ExecutionPlan>> {
-            Ok(Arc::new(Int64ListExec::new(self.numbers.clone())))
+            let node =
+                Int64ListExecProto::decode(buf).map_err(|err| proto_error(format!("{err}")))?;
+            Ok(Arc::new(Int64ListExec::new(node.numbers.clone())))
         }
 
-        fn try_from_physical_plan(
-            plan: Arc<dyn ExecutionPlan>,
-            _: &dyn PhysicalExtensionCodec,
-        ) -> datafusion::common::Result<Self>
-        where
-            Self: Sized,
-        {
-            let Some(plan) = plan.as_any().downcast_ref::<Int64ListExec>() else {
-                return Err(proto_error(format!("Expected plan to be of type Int64ListExec, but was {}", plan.name())));
+        fn try_encode(
+            &self,
+            node: Arc<dyn ExecutionPlan>,
+            buf: &mut Vec<u8>,
+        ) -> datafusion::common::Result<()> {
+            let Some(plan) = node.as_any().downcast_ref::<Int64ListExec>() else {
+                return Err(proto_error(format!(
+                    "Expected plan to be of type Int64ListExec, but was {}",
+                    node.name()
+                )));
             };
-            Ok(Int64ListExecProto {
+            Int64ListExecProto {
                 numbers: plan.numbers.clone(),
-            })
+            }
+            .encode(buf)
+            .map_err(|err| proto_error(format!("{err}")))
         }
     }
 }

@@ -3,7 +3,7 @@ mod common;
 #[cfg(test)]
 mod tests {
     use crate::assert_snapshot;
-    use crate::common::localhost::start_localhost_context;
+    use crate::common::localhost::{start_localhost_context, NoopSessionBuilder};
     use crate::common::parquet::register_parquet_tables;
     use crate::common::plan::distribute_aggregate;
     use datafusion::arrow::util::pretty::pretty_format_batches;
@@ -13,7 +13,8 @@ mod tests {
 
     #[tokio::test]
     async fn distributed_aggregation() -> Result<(), Box<dyn Error>> {
-        let (ctx, _guard) = start_localhost_context([50050, 50051, 50052]).await;
+        let (ctx, _guard) =
+            start_localhost_context([50050, 50051, 50052], NoopSessionBuilder).await;
         register_parquet_tables(&ctx).await?;
 
         let df = ctx

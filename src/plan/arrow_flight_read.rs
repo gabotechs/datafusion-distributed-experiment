@@ -110,7 +110,6 @@ impl ExecutionPlan for ArrowFlightReadExec {
         partition: usize,
         context: Arc<TaskContext>,
     ) -> datafusion::common::Result<SendableRecordBatchStream> {
-        let runtime = context.runtime_env();
         let partitioning = self.properties.partitioning.clone();
 
         let channel_manager = ChannelManager::try_from_session(context.session_config())?;
@@ -173,8 +172,8 @@ impl ExecutionPlan for ArrowFlightReadExec {
             }
 
             let mut codec = ComposedPhysicalExtensionCodec::default();
-            codec.push(ArrowFlightReadExecProtoCodec::new(&context.runtime_env()));
             codec.push_from_config(context.session_config());
+            codec.push(ArrowFlightReadExecProtoCodec::new(&context.runtime_env()));
 
             let ticket = DoGet::new_remote_plan_exec_ticket(
                 plan,

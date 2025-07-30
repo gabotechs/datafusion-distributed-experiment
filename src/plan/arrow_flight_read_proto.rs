@@ -10,6 +10,7 @@ use datafusion_proto::protobuf::{proto_error, PhysicalPlanNode};
 use prost::bytes::BufMut;
 use prost::Message;
 use std::sync::Arc;
+use crate::composed_extension_codec::PhysicalExtensionCodecExt;
 
 /// DataFusion [PhysicalExtensionCodec] implementation that allows sending and receiving
 /// [ArrowFlightReadExecProto] over the wire.
@@ -26,17 +27,18 @@ impl ArrowFlightReadExecProtoCodec {
     }
 }
 
-impl PhysicalExtensionCodec for ArrowFlightReadExecProtoCodec {
+impl PhysicalExtensionCodecExt for ArrowFlightReadExecProtoCodec {
     fn try_decode(
         &self,
         buf: &[u8],
         _inputs: &[Arc<dyn ExecutionPlan>], // TODO: why would I want this here
         registry: &dyn FunctionRegistry,
+        codec: &dyn PhysicalExtensionCodec
     ) -> datafusion::common::Result<Arc<dyn ExecutionPlan>> {
         ArrowFlightReadExecProto::try_decode(buf)?.try_into_physical_plan(
             registry,
             &self.runtime,
-            self,
+            codec,
         )
     }
 
@@ -44,8 +46,9 @@ impl PhysicalExtensionCodec for ArrowFlightReadExecProtoCodec {
         &self,
         node: Arc<dyn ExecutionPlan>,
         buf: &mut Vec<u8>,
+        codec: &dyn PhysicalExtensionCodec
     ) -> datafusion::common::Result<()> {
-        ArrowFlightReadExecProto::try_from_physical_plan(node, self)?.try_encode(buf)
+        ArrowFlightReadExecProto::try_from_physical_plan(node, codec)?.try_encode(buf)
     }
 }
 
@@ -111,7 +114,7 @@ impl AsExecutionPlan for ArrowFlightReadExecProto {
         Self: Sized,
     {
         let Some(node) = plan.as_any().downcast_ref::<ArrowFlightReadExec>() else {
-            return Err(proto_error("Only ArrowFlightReadExec is supported"));
+            return Err(proto_error(format!("Expected ArrowFlightReadExec, but got {}", plan.name())));
         };
         if node.children().len() != 1 {
             return Err(proto_error(format!(

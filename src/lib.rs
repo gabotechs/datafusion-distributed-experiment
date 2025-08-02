@@ -3,12 +3,12 @@ mod composed_extension_codec;
 mod errors;
 mod flight_service;
 mod plan;
-mod stage_delegation;
 #[cfg(test)]
 pub mod test_utils;
+pub(crate) mod context;
 
 pub use channel_manager::{
-    ArrowFlightChannel, BoxCloneSyncChannel, ChannelManager, ChannelResolver,
+     BoxCloneSyncChannel, ChannelManager, ChannelResolver,
 };
 pub use flight_service::{ArrowFlightEndpoint, SessionBuilder};
-pub use plan::ArrowFlightReadExec;
+pub use plan::{ArrowFlightReadExec, assign_stages};

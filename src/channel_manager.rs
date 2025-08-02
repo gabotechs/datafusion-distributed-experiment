@@ -21,16 +21,14 @@ pub type BoxCloneSyncChannel = tower::util::BoxCloneSyncService<
     tonic::transport::Error,
 >;
 
-#[derive(Clone, Debug)]
-pub struct ArrowFlightChannel {
-    pub url: Url,
-    pub channel: BoxCloneSyncChannel,
-}
-
+/// Abstracts networking details so that users can implement their own network resolution
+/// mechanism.
 #[async_trait]
 pub trait ChannelResolver {
-    async fn get_n_channels(&self, n: usize) -> Result<Vec<ArrowFlightChannel>, DataFusionError>;
-    async fn get_channel_for_url(&self, url: &Url) -> Result<ArrowFlightChannel, DataFusionError>;
+    /// Gets all available worker URLs. Used during stage assignment.
+    fn get_urls(&self) -> Result<Vec<Url>, DataFusionError>;
+    /// For a given URL, get a channel for communicating to it.
+    async fn get_channel_for_url(&self, url: &Url) -> Result<BoxCloneSyncChannel, DataFusionError>;
 }
 
 impl ChannelManager {
@@ -42,8 +40,8 @@ impl ChannelManager {
 
     delegate! {
         to self.0 {
-            pub async fn get_n_channels(&self, n: usize) -> Result<Vec<ArrowFlightChannel>, DataFusionError>;
-            pub async fn get_channel_for_url(&self, url: &Url) -> Result<ArrowFlightChannel, DataFusionError>;
+            pub fn get_urls(&self) -> Result<Vec<Url>, DataFusionError>;
+            pub async fn get_channel_for_url(&self, url: &Url) -> Result<BoxCloneSyncChannel, DataFusionError>;
         }
     }
 }

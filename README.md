@@ -76,235 +76,139 @@ Where each partial `AggregateExec` executes on a physical machine.
 
 This can be done be injecting the appropriate `ArrowFlightReadExec` nodes in the appropriate places:
 ```
-                              ┌──────────────────────┐
-                              │    ProjectionExec    │
-                              └──────────────────────┘  
-                                         ▲
-                              ┌──────────┴───────────┐
-                              │    AggregateExec     │
-                              │       (final)        │
-                              └──────────────────────┘  
-                                         ▲
-                              ┌──────────┴───────────┐
-                              │  ArrowFlightReadExec │
-                              └──────────────────────┘  
-                                       ▲ ▲ ▲                                         ┐
-              ┌────────────────────────┘ │ └─────────────────────────┐               │
-   ┌──────────┴───────────┐   ┌──────────┴───────────┐   ┌───────────┴──────────┐    │
-   │ ArrowFlightEndpoint  │   │ ArrowFlightEndpoint  │   │ ArrowFlightEndpoint  │    │
-   └──────────┬───────────┘   └──────────┬───────────┘   └───────────┬──────────┘    │
-   ┌──────────┴───────────┐   ┌──────────┴───────────┐   ┌───────────┴──────────┐    │
-   │    AggregateExec     │   │    AggregateExec     │   │    AggregateExec     │    │
-   │      (partial)       │   │      (partial)       │   │      (partial)       │    │ stage 1
-   └──────────┬───────────┘   └──────────┬───────────┘   └───────────┬──────────┘    │
-   ┌──────────┴───────────┐   ┌──────────┴───────────┐   ┌───────────┴──────────┐    │
-   │ ArrowFlightReadExec  │   │ ArrowFlightReadExec  │   │ ArrowFlightReadExec  │    │
-   └──────────────────────┘   └──────────────────────┘   └──────────────────────┘    │
-              ▲                          ▲                           ▲               │
-              └────────────────────────┐ │ ┌─────────────────────────┘               ┘
-                              ┌────────┴─┴─┴─────────┐                               ┐
-                              │  ArrowFlightEndpoint │                               │
-                              └──────────┬───────────┘                               │ stage 2
-                              ┌──────────┴───────────┐                               │
-                              │    DataSourceExec    │                               │ 
-                              └──────────────────────┘                               ┘
+                               ┌──────────────────────┐
+                               │    ProjectionExec    │
+                               └──────────────────────┘  
+                                          ▲
+                               ┌──────────┴───────────┐
+                               │    AggregateExec     │
+                               │       (final)        │
+                               └──────────────────────┘  
+                                          ▲
+                               ┌──────────┴───────────┐
+                               │  ArrowFlightReadExec │
+                               └──────────────────────┘  
+                                        ▲ ▲ ▲                                          
+               ┌────────────────────────┘ │ └─────────────────────────┐                   
+               │                          │                           │               ┐
+   ┌─── task 0 (stage 1) ───┐ ┌── task 1 (stage 1) ────┐ ┌── task 2 (stage 1) ────┐   │
+   │┌─ ─ ─ ─ ─ ┴ ─ ─ ─ ─ ─ ┐│ │┌─ ─ ─ ─ ─ ┴ ─ ─ ─ ─ ─ ┐│ │┌ ─ ─ ─ ─ ─ ┴ ─ ─ ─ ─ ─┐│   │
+   ││ ArrowFlightEndpoint  ││ ││ ArrowFlightEndpoint  ││ ││ ArrowFlightEndpoint  ││   │
+   │└─ ─ ─ ─ ─ ┬ ─ ─ ─ ─ ─ ┘│ │└─ ─ ─ ─ ─ ┬ ─ ─ ─ ─ ─ ┘│ │└ ─ ─ ─ ─ ─ ┬ ─ ─ ─ ─ ─┘│   │
+   │┌──────────┴───────────┐│ │┌──────────┴───────────┐│ │┌───────────┴──────────┐│   │
+   ││    AggregateExec     ││ ││    AggregateExec     ││ ││    AggregateExec     ││   │
+   ││      (partial)       ││ ││      (partial)       ││ ││      (partial)       ││   │ stage 1
+   │└──────────┬───────────┘│ │└──────────┬───────────┘│ │└───────────┬──────────┘│   │
+   │┌──────────┴───────────┐│ │┌──────────┴───────────┐│ │┌───────────┴──────────┐│   │
+   ││ ArrowFlightReadExec  ││ ││ ArrowFlightReadExec  ││ ││ ArrowFlightReadExec  ││   │
+   │└──────────────────────┘│ │└──────────────────────┘│ │└──────────────────────┘│   │
+   └───────────▲────────────┘ └───────────▲────────────┘ └────────────▲───────────┘   │
+               │                          │                           │               ┘
+               └────────────────────────┐ │ ┌─────────────────────────┘               
+                              ┌─── task 1 (stage 0) ───┐          
+                              │┌─ ─ ─ ─ ┴ ┴ ┴ ─ ─ ─ ─ ┐│                              ┐
+                              ││  ArrowFlightEndpoint ││                              │
+                              │└─ ─ ─ ─ ─ ┬ ─ ─ ─ ─ ─ ┘│                              │ stage 0
+                              │┌──────────┴───────────┐│                              │
+                              ││    DataSourceExec    ││                              │ 
+                              │└──────────────────────┘│                              ┘
+                              └────────────────────────┘
 ```
 
-Now, let's zoom in into the first distribution step for the plan above:
+Note that because of us placing an `ArrowFlightReadExec`, a new `ArrowFlightEndpoint` was also introduced.
+In practice, this is not represented as a physical execution node in the plan; instead, it's just an Arrow Flight
+service that listens to gRPC comms and executes the provided plan.
+
+Now, how does the top `ArrowFlightReadExec` know which are the URLs for the three target `ArrowFlightEndpoint`s?
+Initially, once the appropriate `ArrowFlightReadExec` nodes have been placed in the plan, they contain some empty
+slots, which an extra planning step is supposed to fill.
+
+In order to understand that, let's visualize again the original plan:
 
 ```
-                              ┌──────────┴───────────┐
-                              │  ArrowFlightReadExec │
-                              └──────────────────────┘  
-                                       ▲ ▲ ▲
-              ┌────────────────────────┘ │ └─────────────────────────┐
-   ┌──────────┴───────────┐   ┌──────────┴───────────┐   ┌───────────┴──────────┐
-   │ ArrowFlightEndpoint  │   │ ArrowFlightEndpoint  │   │ ArrowFlightEndpoint  │
-   └──────────┬───────────┘   └──────────┬───────────┘   └───────────┬──────────┘
+   ┌──────────────────────┐
+   │    ProjectionExec    │
+   └──────────────────────┘  
+              ▲
+   ┌──────────┴───────────┐
+   │    AggregateExec     │
+   └──────────────────────┘  
+              ▲
+   ┌──────────┴───────────┐
+   │    DataSourceExec    │
+   └──────────────────────┘  
 ```
 
+We want to distribute this, so we tweak the plan ourselves to inject the `ArrowFlightReadExec` where it makes sense,
+and divide the aggregation in two: one partial and one final aggregation:
 
-There's only one `ArrowFlightReadExec`, so in this case it's straightforward, no coordination 
-is necessary between multiple `ArrowFlightReadExec`, as there's only one, and can just issue
-3 queries to 3 different `ArrowFlightEndpoint`. The 3 specific `ArrowFlightEndpoint` urls do
-not even need to be resolved at planning time, `ArrowFlightReadExec` can just rely on whatever
-load balancing mechanism existed on the first place to go to three different `ArrowFlightEndpoint`s.
-
-
-Now, let's look at the last distribution step:
 
 ```
-   ┌──────────┴───────────┐   ┌──────────┴───────────┐   ┌───────────┴──────────┐
-   │ ArrowFlightReadExec  │   │ ArrowFlightReadExec  │   │ ArrowFlightReadExec  │
-   └──────────────────────┘   └──────────────────────┘   └──────────────────────┘
-              ▲                          ▲                           ▲
-              └────────────────────────┐ │ ┌─────────────────────────┘
-                              ┌────────┴─┴─┴─────────┐
-                              │  ArrowFlightEndpoint │
-                              └──────────┬───────────┘
+   ┌──────────────────────┐
+   │    ProjectionExec    │
+   └──────────────────────┘  
+              ▲
+   ┌──────────┴───────────┐
+   │    AggregateExec     │
+   │       (final)        │
+   └──────────────────────┘  
+              ▲
+   ┌──────────┴───────────┐ input_tasks=3
+   │ ArrowFlightReadExec  │
+   └──────────────────────┘
+              ▲
+   ┌──────────┴───────────┐
+   │    AggregateExec     │
+   │      (partial)       │
+   └──────────────────────┘
+              ▲
+   ┌──────────┴───────────┐ input_tasks=1 shuffle_hash=[grouping_col]
+   │ ArrowFlightReadExec  │
+   └──────────────────────┘
+              ▲
+   ┌──────────┴───────────┐
+   │    DataSourceExec    │
+   └──────────────────────┘  
 ```
 
-Each `ArrowFlightReadExec` need to go to exactly the same `ArrowFlightEndpoint`, so in this case
-some coordination is needed. The 3 different `ArrowFlightReadExec` cannot just query a random
-`ArrowFlightEndpoint`, it needs to be the same, and the `ArrowFlightEndpoint` will need to know
-how to fanout its data into 3 different partitions.
+This is all the information the user needed to provide while injecting the `ArrowFlightReadExec` nodes:
+- The number of input tasks from which each `ArrowFlightReadExec`
+- An optional expression telling the target stage how data should be shuffled (or round-robin by default)
 
-This is the only place where some actual coordination is needed, and to understand how it's
-done, some terminology needs to be explained first:
-- **Stage**: A stage is a chunk of nodes that are getting executed in parallel potentially in different machines.
-  In the third diagram above, the different stages for the distributed queries are shown on the right.
-- **Actor**: An actor, is each one of the `ArrowFlightReadExec` nodes in a stage that need to coordinate together
-  to go to the next stage.
-- **Delegate**: A delegate is an actor that was chosen by the previous stage to act as a "leader", and communicate
-  to all its peer actors information relevant about the next stage
+The extra planning step will assign all the missing information to each `ArrowFlightReadExec`:
+- A unique ID identifying the stage in which the `ArrowFlightReadExec` lives
+- A unique ID identifying the input stage from which the `ArrowFlightReadExec` needs to read
+- The total number of tasks involved in the current stage
+- The target URLs serving data from the input stage to which the `ArrowFlightReadExec` is supposed to go
 
-Going back to the diagram above, imagine the `ArrowFlightEndpoint` below is the one listening on IP `10.0.0.25`:
-```
-   ┌──────────┴───────────┐   ┌──────────┴───────────┐   ┌───────────┴──────────┐
-   │ ArrowFlightReadExec  │   │ ArrowFlightReadExec  │   │ ArrowFlightReadExec  │
-   │      (delegate)      │   │       (actor)        │   │        (actor)       │
-   └──────────────────────┘   └──────────────────────┘   └──────────────────────┘
-                                                                      
-                                                                      
-                              ┌──────────────────────┐
-                              │  ArrowFlightEndpoint │
-                              │      10.0.0.25       │
-                              └──────────┬───────────┘
-```
-
-First, the delegate resolves its IP:
 
 ```
-   ┌──────────┴───────────┐   ┌──────────┴───────────┐   ┌───────────┴──────────┐
-   │ ArrowFlightReadExec  │   │ ArrowFlightReadExec  │   │ ArrowFlightReadExec  │
-   │      (delegate)      │   │       (actor)        │   │        (actor)       │
-   └──────────┬───────────┘   └──────────────────────┘   └──────────────────────┘
-          next stage
-      actors: [10.0.0.25]
-              └────────────────────────┐
-                              ┌──────────────────────┐
-                              │  ArrowFlightEndpoint │
-                              │      10.0.0.25       │
-                              └──────────┬───────────┘
+  ┌             ┌──────────────────────┐
+  │             │    ProjectionExec    │
+  │             └──────────────────────┘  
+  │                        ▲
+  │             ┌──────────┴───────────┐   * Note that this is the head of the plan, and this will run normally
+  │             │    AggregateExec     │     as if it was single node, so the stage identifier here is irrelevant
+  │ stage 2     │       (final)        │
+  │             └──────────────────────┘  
+  │                        ▲
+  │             ┌──────────┴───────────┐ input_tasks=3 shuffle_hash=None
+  │             │ ArrowFlightReadExec  │ stage_id=2 n_tasks=1
+  └             └──────────────────────┘ input_stage_id=1 input_urls=[10.0.0.25, 10.0.0.26, 10.0.0.27]
+                           ▲
+  ┌             ┌──────────┴───────────┐
+  │             │    AggregateExec     │
+  │             │      (partial)       │
+  │             └──────────────────────┘
+  │ stage 1                ▲
+  │             ┌──────────┴───────────┐ input_tasks=1 shuffle_hash=[grouping_col]
+  │             │ ArrowFlightReadExec  │ stage_id=1 n_tasks=3
+  └             └──────────────────────┘ input_stage_id=0 input_urls=[10.0.0.28]
+                           ▲
+  ┌             ┌──────────┴───────────┐
+  │ stage 0     │    DataSourceExec    │
+  └             └──────────────────────┘  
 ```
-
-Then, the delegate communicates to its actor colleagues what the next stage looks like:
-```
-                             next stage                 next stage
-                        actors: [10.0.0.25]        actors: [10.0.0.25]
-                        ┌────────┬──────────────────────────┐
-                        │        ▼                          ▼        
-   ┌──────────┴─────────┴─┐   ┌──────────┴───────────┐   ┌───────────┴──────────┐
-   │ ArrowFlightReadExec  │   │ ArrowFlightReadExec  │   │ ArrowFlightReadExec  │
-   │      (delegate)      │   │       (actor)        │   │        (actor)       │
-   └──────────┬───────────┘   └──────────────────────┘   └──────────────────────┘
-          next stage             
-      actors: [10.0.0.25]   
-              └────────────────────────┐
-                              ┌──────────────────────┐
-                              │  ArrowFlightEndpoint │
-                              │      10.0.0.25       │
-                              └──────────┬───────────┘
-```
-
-Then, all actors start querying the same `ArrowFlightEndpoint`:
-
-```
-   ┌──────────┴───────────┐   ┌──────────┴───────────┐   ┌───────────┴──────────┐
-   │ ArrowFlightReadExec  │   │ ArrowFlightReadExec  │   │ ArrowFlightReadExec  │
-   │      (delegate)      │   │       (actor)        │   │        (actor)       │
-   └──────────┬───────────┘   └──────────┬───────────┘   └───────────┬──────────┘
-          next stage                 next stage                 next stage
-      actors: [10.0.0.25]        actors: [10.0.0.25]         actors: [10.0.0.25]
-              └────────────────────────┐ │ ┌─────────────────────────┘
-                              ┌──────────────────────┐
-                              │  ArrowFlightEndpoint │
-                              │      10.0.0.25       │
-                              └──────────┬───────────┘
-```
-
-But wait, how does the `delegate` know what are the IPs of its peer actors? the `delegate` cannot
-just go to two other random nodes hoping that they actually belong to the same stage.
-
-This is solved by propagating a `StageContext` between stages that contain information about
-what actors are involved in the stage, and this must have been done at the beginning, when the 
-first stage was created here.
-
-```
-                              ┌──────────────────────┐
-                              │    ProjectionExec    │
-                              └──────────────────────┘  
-                                         ▲
-                              ┌──────────┴───────────┐
-                              │    AggregateExec     │
-                              │       (final)        │
-                              └──────────────────────┘  
-                                         ▲
-                              ┌──────────┴───────────┐
-                              │  ArrowFlightReadExec │ <-This one is responsible 
-                              └──────────────────────┘   for propagating the StageContext
-                                       ▲ ▲ ▲                                         ┐
-              ┌────────────────────────┘ │ └─────────────────────────┐               │
-   ┌──────────┴───────────┐   ┌──────────┴───────────┐   ┌───────────┴──────────┐    │
-   │ ArrowFlightEndpoint  │   │ ArrowFlightEndpoint  │   │ ArrowFlightEndpoint  │    │  stage 1
-   └──────────┬───────────┘   └──────────┬───────────┘   └───────────┬──────────┘    │
-```
-
-
-In practice, two pieces of information are propagated:
-- `StageContext`: information about the actors involved in stage and who is the delegate of that stage. This information
-   is the same for all the actors inside the same stage.
-- `ActorContext`: information about the actual actor running part of the query. This allows different actors inside a
-   stage to self-identify and know whether they are the delegate or they are plain actors.
-
-Zooming in into the `ArrowFlightReadExec` node, it will look like this:
-
-```
-                              ┌──────────┴───────────┐
-                              │  ArrowFlightReadExec │
-                              └──────────────────────┘  
-                                     next stage                                      ┐
-                    actors: [10.0.0.10, 10.0.0.11, 10.0.0.12]                        │
-              ┌────────────────────────┘ │ └─────────────────────────┐               │
-   ┌──────────┴───────────┐   ┌──────────┴───────────┐   ┌───────────┴──────────┐    │
-   │ ArrowFlightEndpoint  │   │ ArrowFlightEndpoint  │   │ ArrowFlightEndpoint  │    │
-   │      10.0.0.10       │   │      10.0.0.11       │   │       10.0.0.12      │    │
-   └──────────┬───────────┘   └──────────┬───────────┘   └───────────┬──────────┘    │ 
-        StageContext:              StageContext:               StageContext:         │ 
-         actors: [                   actors: [                   actors: [           │ stage 1
-          10.0.0.10,                   10.0.0.10,                  10.0.0.10,        │ 
-          10.0.0.11,                   10.0.0.11,                  10.0.0.11,        │ 
-          10.0.0.12                    10.0.0.12                   10.0.0.12         │  
-         ]                           ]                           ]                   │      
-         delegate: 0                 delegate: 0                 delegate: 0         │    
-        ActorContext:              ActorContext:               ActorContext:         │       
-         actor_idx: 0                actor_idx: 1                actor_idx: 2        │      
-```
-
-With this, the delegate of the first stage has all the information necessary for communicating details
-about the next stage (the second one) to its peer actors from the current stage (the first one).
-```
-              │                                                                       
-       StageContext:                                                                 │
-        actors: [                                                                    │
-         10.0.0.10,                                                                  │
-         10.0.0.11,                                                                  │
-         10.0.0.12                                                                   │
-        ]                                                                            │
-        delegate: 0     ┌────────┬──────────────────────────┐                        │ stage 1
-       ActorContext:    │    10.0.0.11                  10.0.0.12                    │
-        actor_idx: 0    │        ▼                          ▼                        │
-   ┌──────────┴─────────┴─┐   ┌──────────┴───────────┐   ┌───────────┴──────────┐    │
-   │ ArrowFlightReadExec  │   │ ArrowFlightReadExec  │   │ ArrowFlightReadExec  │    │
-   │      (delegate)      │   │       (actor)        │   │        (actor)       │    │
-   └──────────┬───────────┘   └──────────────────────┘   └──────────────────────┘    ┘
-              └────────────────────────┐                                             ┐
-                              ┌──────────────────────┐                               │
-                              │  ArrowFlightEndpoint │                               │
-                              │      10.0.0.25       │                               │ stage 2
-                              └──────────┬───────────┘                               │
-```
-
 
 # Example
 

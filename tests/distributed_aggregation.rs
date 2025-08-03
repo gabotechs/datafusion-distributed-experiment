@@ -9,7 +9,7 @@ mod tests {
     use crate::common::plan::distribute_aggregate;
     use datafusion::arrow::util::pretty::pretty_format_batches;
     use datafusion::physical_plan::{displayable, execute_stream};
-    use datafusion_distributed::{assign_stages, ChannelManager};
+    use datafusion_distributed::assign_stages;
     use futures::TryStreamExt;
     use std::error::Error;
 
@@ -26,12 +26,8 @@ mod tests {
         let physical_str = displayable(physical.as_ref()).indent(true).to_string();
 
         let physical_distributed = distribute_aggregate(physical.clone())?;
-        let physical_distributed = assign_stages(
-            physical_distributed,
-            &ChannelManager::try_from_session(ctx.task_ctx().session_config())?
-                .as_ref()
-                .get_urls()?,
-        )?;
+        let physical_distributed = assign_stages(physical_distributed, &ctx)?;
+
         let physical_distributed_str = displayable(physical_distributed.as_ref())
             .indent(true)
             .to_string();

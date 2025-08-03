@@ -118,7 +118,7 @@ impl ExecutionPlan for ArrowFlightReadExec {
         context: Arc<TaskContext>,
     ) -> datafusion::common::Result<SendableRecordBatchStream> {
         let plan = Arc::clone(&self.child);
-        let channel_manager = ChannelManager::try_from_session(context.session_config())?;
+        let channel_manager: ChannelManager = context.as_ref().try_into()?;
 
         let Some(stage) = self.stage_context.clone() else {
             return plan_err!("No stage assigned to this ArrowFlightReadExec");

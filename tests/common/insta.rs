@@ -19,7 +19,7 @@ pub fn settings() -> insta::Settings {
     let cpus = available_parallelism().unwrap();
     settings.add_filter(&format!(", {cpus}\\)"), ", CPUs)");
     settings.add_filter(&format!("\\({cpus}\\)"), "(CPUs)");
-    settings.add_filter(&format!("={cpus}"), "=CPUs");
+    settings.add_filter(&format!("input_partitions={cpus}"), "input_partitions=CPUs");
     settings.add_filter(
         r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}",
         "UUID",

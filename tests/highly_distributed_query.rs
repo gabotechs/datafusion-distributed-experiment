@@ -8,7 +8,7 @@ mod tests {
     use crate::common::parquet::register_parquet_tables;
     use datafusion::physical_expr::Partitioning;
     use datafusion::physical_plan::{displayable, execute_stream};
-    use datafusion_distributed::{assign_stages, ArrowFlightReadExec, ChannelManager};
+    use datafusion_distributed::{assign_stages, ArrowFlightReadExec};
     use futures::TryStreamExt;
     use std::error::Error;
     use std::sync::Arc;
@@ -35,14 +35,7 @@ mod tests {
                 Partitioning::RoundRobinBatch(size),
             ));
         }
-
-        let physical_distributed = assign_stages(
-            physical_distributed,
-            &ChannelManager::try_from_session(ctx.task_ctx().session_config())?
-                .as_ref()
-                .get_urls()?,
-        )?;
-
+        let physical_distributed = assign_stages(physical_distributed, &ctx)?;
         let physical_distributed_str = displayable(physical_distributed.as_ref())
             .indent(true)
             .to_string();

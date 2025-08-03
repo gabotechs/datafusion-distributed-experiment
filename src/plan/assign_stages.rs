@@ -1,19 +1,20 @@
 use crate::context::StageContext;
-use crate::ArrowFlightReadExec;
+use crate::{ArrowFlightReadExec, ChannelManager};
 use datafusion::common::tree_node::{Transformed, TreeNode};
 use datafusion::error::DataFusionError;
 use datafusion::physical_plan::ExecutionPlan;
 use std::cell::RefCell;
 use std::sync::Arc;
-use url::Url;
 use uuid::Uuid;
 
 pub fn assign_stages(
     plan: Arc<dyn ExecutionPlan>,
-    urls: &[Url],
+    channel_manager: impl TryInto<ChannelManager, Error = DataFusionError>,
 ) -> Result<Arc<dyn ExecutionPlan>, DataFusionError> {
     let stack = RefCell::new(vec![]);
     let mut i = 0;
+
+    let urls = channel_manager.try_into()?.get_urls()?;
 
     Ok(plan
         .transform_down_up(

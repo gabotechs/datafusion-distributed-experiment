@@ -1,11 +1,12 @@
 use std::env;
-use std::thread::available_parallelism;
+
+pub use insta;
 
 #[macro_export]
 macro_rules! assert_snapshot {
     ($($arg:tt)*) => {
-        $crate::common::insta::settings().bind(|| {
-            insta::assert_snapshot!($($arg)*);
+        $crate::test_utils::insta::settings().bind(|| {
+            $crate::test_utils::insta::insta::assert_snapshot!($($arg)*);
         })
     };
 }
@@ -16,10 +17,6 @@ pub fn settings() -> insta::Settings {
     let cwd = env::current_dir().unwrap();
     let cwd = cwd.to_str().unwrap();
     settings.add_filter(cwd.trim_start_matches("/"), "");
-    let cpus = available_parallelism().unwrap();
-    settings.add_filter(&format!(", {cpus}\\)"), ", CPUs)");
-    settings.add_filter(&format!("\\({cpus}\\)"), "(CPUs)");
-    settings.add_filter(&format!("input_partitions={cpus}"), "input_partitions=CPUs");
     settings.add_filter(
         r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}",
         "UUID",

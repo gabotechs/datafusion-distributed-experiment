@@ -21,5 +21,13 @@ dashmap = "6.1.0"
 prost = "0.13.5"
 object_store = "0.12.3"
 
+# integration
+insta = { version = "1.43.1", features = ["filters"], optional = true }
+
+[features]
+integration = [
+    "insta",
+]
+
 [dev-dependencies]
-insta = { version = "1.43.1" , features = ["filters"]}
+insta = { version = "1.43.1", features = ["filters"] }

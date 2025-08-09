@@ -1,10 +1,5 @@
-#[allow(dead_code)]
-mod common;
-
-#[cfg(test)]
+#[cfg(all(feature = "integration", test))]
 mod tests {
-    use crate::assert_snapshot;
-    use crate::common::localhost::start_localhost_context;
     use datafusion::arrow::array::Int64Array;
     use datafusion::arrow::compute::SortOptions;
     use datafusion::arrow::datatypes::{DataType, Field, Schema};
@@ -27,7 +22,10 @@ mod tests {
     use datafusion::physical_plan::{
         displayable, execute_stream, DisplayAs, DisplayFormatType, ExecutionPlan, PlanProperties,
     };
-    use datafusion_distributed::{assign_stages, ArrowFlightReadExec, SessionBuilder};
+    use datafusion_distributed::test_utils::localhost::start_localhost_context;
+    use datafusion_distributed::{
+        assert_snapshot, assign_stages, ArrowFlightReadExec, SessionBuilder,
+    };
     use datafusion_proto::physical_plan::PhysicalExtensionCodec;
     use datafusion_proto::protobuf::proto_error;
     use futures::{stream, TryStreamExt};
@@ -70,7 +68,7 @@ mod tests {
 
         assert_snapshot!(displayable(distributed_plan.as_ref()).indent(true).to_string(), @r"
         SortExec: expr=[numbers@0 DESC NULLS LAST], preserve_partitioning=[false]
-          RepartitionExec: partitioning=RoundRobinBatch(1), input_partitions=CPUs
+          RepartitionExec: partitioning=RoundRobinBatch(1), input_partitions=10
             ArrowFlightReadExec: input_tasks=10 hash_expr=[] stage_id=UUID input_stage_id=UUID input_hosts=[http://localhost:50050/, http://localhost:50051/, http://localhost:50052/, http://localhost:50050/, http://localhost:50051/, http://localhost:50052/, http://localhost:50050/, http://localhost:50051/, http://localhost:50052/, http://localhost:50050/]
               SortExec: expr=[numbers@0 DESC NULLS LAST], preserve_partitioning=[false]
                 ArrowFlightReadExec: input_tasks=1 hash_expr=[numbers@0] stage_id=UUID input_stage_id=UUID input_hosts=[http://localhost:50051/]
@@ -133,7 +131,8 @@ mod tests {
             LexOrdering::new(vec![PhysicalSortExpr::new(
                 col("numbers", &plan.schema())?,
                 SortOptions::new(true, false),
-            )]).unwrap(),
+            )])
+            .unwrap(),
             plan,
         ));
 

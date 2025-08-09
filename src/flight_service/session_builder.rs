@@ -47,6 +47,7 @@ pub trait SessionBuilder {
 
 /// Noop implementation of the [SessionBuilder]. Used by default if no [SessionBuilder] is provided
 /// while building the Arrow Flight endpoint.
+#[derive(Debug, Clone)]
 pub struct NoopSessionBuilder;
 
 impl SessionBuilder for NoopSessionBuilder {

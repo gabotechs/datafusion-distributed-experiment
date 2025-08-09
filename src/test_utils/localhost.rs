@@ -1,26 +1,17 @@
-use arrow_flight::flight_service_server::FlightServiceServer;
-use async_trait::async_trait;
-use datafusion::common::runtime::JoinSet;
-use datafusion::common::DataFusionError;
-use datafusion::execution::SessionStateBuilder;
-use datafusion::prelude::SessionContext;
-use datafusion_distributed::{
+use crate::{
     ArrowFlightEndpoint, BoxCloneSyncChannel, ChannelManager, ChannelResolver, SessionBuilder,
 };
+use arrow_flight::flight_service_server::FlightServiceServer;
+use async_trait::async_trait;
+use datafusion::common::DataFusionError;
+use datafusion::prelude::SessionContext;
+use datafusion::{common::runtime::JoinSet, prelude::SessionConfig};
 use std::error::Error;
 use std::sync::atomic::AtomicUsize;
 use std::sync::Arc;
 use std::time::Duration;
 use tonic::transport::{Channel, Server};
 use url::Url;
-
-#[derive(Debug, Clone)]
-pub struct NoopSessionBuilder;
-impl SessionBuilder for NoopSessionBuilder {
-    fn on_new_session(&self, builder: SessionStateBuilder) -> SessionStateBuilder {
-        builder
-    }
-}
 
 pub async fn start_localhost_context<N, I, B>(
     ports: I,
@@ -47,7 +38,8 @@ where
     }
     tokio::time::sleep(Duration::from_millis(100)).await;
 
-    let ctx = SessionContext::new();
+    let config = SessionConfig::new().with_target_partitions(3);
+    let ctx = SessionContext::new_with_config(config);
 
     ctx.state_ref()
         .write()

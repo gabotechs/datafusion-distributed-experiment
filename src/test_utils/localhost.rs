@@ -8,7 +8,6 @@ use datafusion::execution::SessionStateBuilder;
 use datafusion::prelude::SessionContext;
 use datafusion::{common::runtime::JoinSet, prelude::SessionConfig};
 use std::error::Error;
-use std::sync::atomic::AtomicUsize;
 use std::sync::Arc;
 use std::time::Duration;
 use tonic::transport::{Channel, Server};
@@ -37,7 +36,7 @@ where
                 .unwrap();
         });
     }
-    tokio::time::sleep(Duration::from_millis(100)).await;
+    tokio::time::sleep(Duration::from_millis(10)).await;
 
     let config = SessionConfig::new().with_target_partitions(3);
 
@@ -63,7 +62,6 @@ where
 #[derive(Clone)]
 pub struct LocalHostChannelResolver {
     ports: Vec<u16>,
-    i: Arc<AtomicUsize>,
 }
 
 impl LocalHostChannelResolver {
@@ -72,7 +70,6 @@ impl LocalHostChannelResolver {
         N::Error: std::fmt::Debug,
     {
         Self {
-            i: Arc::new(AtomicUsize::new(0)),
             ports: ports.into_iter().map(|v| v.try_into().unwrap()).collect(),
         }
     }

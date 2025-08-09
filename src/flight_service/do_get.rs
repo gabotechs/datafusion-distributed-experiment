@@ -13,6 +13,7 @@ use datafusion::execution::SessionStateBuilder;
 use datafusion::optimizer::OptimizerConfig;
 use datafusion::physical_expr::{Partitioning, PhysicalExpr};
 use datafusion::physical_plan::ExecutionPlan;
+use datafusion::prelude::SessionContext;
 use datafusion_proto::physical_plan::from_proto::parse_physical_exprs;
 use datafusion_proto::physical_plan::to_proto::serialize_physical_exprs;
 use datafusion_proto::physical_plan::{AsExecutionPlan, PhysicalExtensionCodec};
@@ -95,8 +96,17 @@ impl ArrowFlightEndpoint {
         let state_builder = SessionStateBuilder::new()
             .with_runtime_env(Arc::clone(&self.runtime))
             .with_default_features();
+        let state_builder = self
+            .session_builder
+            .session_state_builder(state_builder)
+            .map_err(|err| datafusion_error_to_tonic_status(&err))?;
 
-        let mut state = self.session_builder.on_new_session(state_builder).build();
+        let state = state_builder.build();
+        let mut state = self
+            .session_builder
+            .session_state(state)
+            .await
+            .map_err(|err| datafusion_error_to_tonic_status(&err))?;
 
         let Some(function_registry) = state.function_registry() else {
             return invalid_argument("FunctionRegistry not present in newly built SessionState");
@@ -146,8 +156,15 @@ impl ArrowFlightEndpoint {
             .get_or_create_stream_partitioner(stage_id, task_idx, plan, partitioning)
             .map_err(|err| datafusion_error_to_tonic_status(&err))?;
 
+        let session_context = SessionContext::new_with_state(state);
+        let session_context = self
+            .session_builder
+            .session_context(session_context)
+            .await
+            .map_err(|err| datafusion_error_to_tonic_status(&err))?;
+
         let stream = stream_partitioner
-            .execute(caller_actor_idx, state.task_ctx())
+            .execute(caller_actor_idx, session_context.task_ctx())
             .map_err(|err| datafusion_error_to_tonic_status(&err))?;
 
         let flight_data_stream = FlightDataEncoderBuilder::new()

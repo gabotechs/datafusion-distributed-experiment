@@ -4,6 +4,7 @@ use crate::{
 use arrow_flight::flight_service_server::FlightServiceServer;
 use async_trait::async_trait;
 use datafusion::common::DataFusionError;
+use datafusion::execution::SessionStateBuilder;
 use datafusion::prelude::SessionContext;
 use datafusion::{common::runtime::JoinSet, prelude::SessionConfig};
 use std::error::Error;
@@ -39,7 +40,17 @@ where
     tokio::time::sleep(Duration::from_millis(100)).await;
 
     let config = SessionConfig::new().with_target_partitions(3);
-    let ctx = SessionContext::new_with_config(config);
+
+    let builder = SessionStateBuilder::new()
+        .with_default_features()
+        .with_config(config);
+    let builder = session_builder.session_state_builder(builder).unwrap();
+
+    let state = builder.build();
+    let state = session_builder.session_state(state).await.unwrap();
+
+    let ctx = SessionContext::new_with_state(state);
+    let ctx = session_builder.session_context(ctx).await.unwrap();
 
     ctx.state_ref()
         .write()

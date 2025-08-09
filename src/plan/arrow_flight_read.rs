@@ -57,13 +57,14 @@ impl DisplayAs for ArrowFlightReadExec {
             None => write!(f, " (Unassigned stage)")?,
             Some(stage) => write!(
                 f,
-                " stage_idx={} input_stage_idx={}",
+                " stage={} input_stage={} tasks={}",
                 stage.idx,
                 stage
                     .input
                     .as_ref()
                     .map(|v| v.idx.to_string())
                     .unwrap_or("None".to_string()),
+                stage.n_tasks
             )?,
         };
 

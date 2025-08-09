@@ -51,12 +51,12 @@ mod tests {
             SortExec: expr=[count(*)@0 ASC NULLS LAST], preserve_partitioning=[true]
               ProjectionExec: expr=[count(Int64(1))@1 as count(*), RainToday@0 as RainToday, count(Int64(1))@1 as count(Int64(1))]
                 AggregateExec: mode=FinalPartitioned, gby=[RainToday@0 as RainToday], aggr=[count(Int64(1))]
-                  ArrowFlightReadExec: stage_idx=0 input_stage_idx=1 input_tasks=8
+                  ArrowFlightReadExec: stage=0 input_stage=1 tasks=1 input_tasks=8
                     CoalesceBatchesExec: target_batch_size=8192
                       RepartitionExec: partitioning=Hash([RainToday@0], 3), input_partitions=3
                         RepartitionExec: partitioning=RoundRobinBatch(3), input_partitions=1
                           AggregateExec: mode=Partial, gby=[RainToday@0 as RainToday], aggr=[count(Int64(1))]
-                            ArrowFlightReadExec: stage_idx=1 input_stage_idx=2 input_tasks=1 hash_expr=[RainToday@0]
+                            ArrowFlightReadExec: stage=1 input_stage=2 tasks=8 input_tasks=1 hash_expr=[RainToday@0]
                               DataSourceExec: file_groups={1 group: [[/testdata/weather.parquet]]}, projection=[RainToday], file_type=parquet
         ",
         );

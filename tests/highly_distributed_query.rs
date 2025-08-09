@@ -45,9 +45,9 @@ mod tests {
 
         assert_snapshot!(physical_distributed_str,
             @r"
-        ArrowFlightReadExec: stage_idx=0 input_stage_idx=1 input_tasks=5
-          ArrowFlightReadExec: stage_idx=1 input_stage_idx=2 input_tasks=10
-            ArrowFlightReadExec: stage_idx=2 input_stage_idx=3 input_tasks=1
+        ArrowFlightReadExec: stage=0 input_stage=1 tasks=1 input_tasks=5
+          ArrowFlightReadExec: stage=1 input_stage=2 tasks=5 input_tasks=10
+            ArrowFlightReadExec: stage=2 input_stage=3 tasks=10 input_tasks=1
               DataSourceExec: file_groups={1 group: [[/testdata/flights-1m.parquet]]}, projection=[FL_DATE, DEP_DELAY, ARR_DELAY, AIR_TIME, DISTANCE, DEP_TIME, ARR_TIME], file_type=parquet
         ",
         );

@@ -65,9 +65,9 @@ mod tests {
         assert_snapshot!(displayable(distributed_plan.as_ref()).indent(true).to_string(), @r"
         SortExec: expr=[numbers@0 DESC NULLS LAST], preserve_partitioning=[false]
           RepartitionExec: partitioning=RoundRobinBatch(1), input_partitions=10
-            ArrowFlightReadExec: stage_idx=0 input_stage_idx=1 input_tasks=10
+            ArrowFlightReadExec: stage=0 input_stage=1 tasks=1 input_tasks=10
               SortExec: expr=[numbers@0 DESC NULLS LAST], preserve_partitioning=[false]
-                ArrowFlightReadExec: stage_idx=1 input_stage_idx=2 input_tasks=1 hash_expr=[numbers@0]
+                ArrowFlightReadExec: stage=1 input_stage=2 tasks=10 input_tasks=1 hash_expr=[numbers@0]
                   FilterExec: numbers@0 > 1
                     Int64ListExec: length=6
         ");

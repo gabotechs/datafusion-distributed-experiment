@@ -85,7 +85,7 @@ mod tests {
               AggregateExec: mode=FinalPartitioned, gby=[WindGustDir@0 as WindGustDir, avg_max_temp@1 as avg_max_temp], aggr=[count(Int64(1))]
                 CoalesceBatchesExec: target_batch_size=8192
                   RepartitionExec: partitioning=Hash([WindGustDir@0, avg_max_temp@1], 3), input_partitions=3
-                    ArrowFlightReadExec: stage_idx=0 input_stage_idx=1 input_tasks=3 hash_expr=[WindGustDir@0, avg_max_temp@1]
+                    ArrowFlightReadExec: stage=0 input_stage=1 tasks=1 input_tasks=3 hash_expr=[WindGustDir@0, avg_max_temp@1]
                       AggregateExec: mode=Partial, gby=[WindGustDir@0 as WindGustDir, avg_max_temp@1 as avg_max_temp], aggr=[count(Int64(1))]
                         CoalesceBatchesExec: target_batch_size=8192
                           HashJoinExec: mode=CollectLeft, join_type=Inner, on=[(WindGustDir@0, WindGustDir@0)], projection=[WindGustDir@0, avg_max_temp@1]
@@ -94,18 +94,18 @@ mod tests {
                                 AggregateExec: mode=FinalPartitioned, gby=[WindGustDir@0 as WindGustDir], aggr=[avg(weather.MaxTemp)]
                                   CoalesceBatchesExec: target_batch_size=8192
                                     RepartitionExec: partitioning=Hash([WindGustDir@0], 3), input_partitions=3
-                                      ArrowFlightReadExec: stage_idx=1 input_stage_idx=2 input_tasks=3 hash_expr=[WindGustDir@0]
+                                      ArrowFlightReadExec: stage=1 input_stage=2 tasks=3 input_tasks=3 hash_expr=[WindGustDir@0]
                                         AggregateExec: mode=Partial, gby=[WindGustDir@1 as WindGustDir], aggr=[avg(weather.MaxTemp)]
                                           CoalesceBatchesExec: target_batch_size=8192
                                             FilterExec: MaxTemp@0 IS NOT NULL
                                               RepartitionExec: partitioning=RoundRobinBatch(3), input_partitions=1
-                                                ArrowFlightReadExec: stage_idx=2 input_stage_idx=3 input_tasks=1
+                                                ArrowFlightReadExec: stage=2 input_stage=3 tasks=3 input_tasks=1
                                                   DataSourceExec: file_groups={1 group: [[/testdata/weather.parquet]]}, projection=[MaxTemp, WindGustDir], file_type=parquet, predicate=MaxTemp@0 IS NOT NULL, pruning_predicate=MaxTemp_null_count@1 != row_count@0, required_guarantees=[]
 
                             CoalesceBatchesExec: target_batch_size=8192
                               FilterExec: Humidity3pm@1 IS NOT NULL, projection=[WindGustDir@0]
                                 RepartitionExec: partitioning=RoundRobinBatch(3), input_partitions=1
-                                  ArrowFlightReadExec: stage_idx=1 input_stage_idx=4 input_tasks=1
+                                  ArrowFlightReadExec: stage=1 input_stage=4 tasks=3 input_tasks=1
                                     DataSourceExec: file_groups={1 group: [[/testdata/weather.parquet]]}, projection=[WindGustDir, Humidity3pm], file_type=parquet, predicate=Humidity3pm@1 IS NOT NULL, pruning_predicate=Humidity3pm_null_count@1 != row_count@0, required_guarantees=[]
         ",
         );

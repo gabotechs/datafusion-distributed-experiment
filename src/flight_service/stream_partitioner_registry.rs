@@ -10,7 +10,7 @@ use uuid::Uuid;
 /// by stage id.
 #[derive(Default)]
 pub struct StreamPartitionerRegistry {
-    map: DashMap<(Uuid, usize), Arc<RepartitionExec>>,
+    map: DashMap<(Uuid, usize, usize), Arc<RepartitionExec>>,
 }
 
 impl StreamPartitionerRegistry {
@@ -18,12 +18,13 @@ impl StreamPartitionerRegistry {
     /// If there was already one, return a reference to it.
     pub fn get_or_create_stream_partitioner(
         &self,
-        id: Uuid,
-        actor_idx: usize,
+        query_id: Uuid,
+        stage_idx: usize,
+        task_idx: usize,
         plan: Arc<dyn ExecutionPlan>,
         partitioning: Partitioning,
     ) -> Result<Arc<RepartitionExec>, DataFusionError> {
-        match self.map.entry((id, actor_idx)) {
+        match self.map.entry((query_id, stage_idx, task_idx)) {
             Entry::Occupied(entry) => Ok(Arc::clone(entry.get())),
             Entry::Vacant(entry) => Ok(Arc::clone(
                 &entry.insert(Arc::new(RepartitionExec::try_new(plan, partitioning)?)),
@@ -50,6 +51,7 @@ mod tests {
         let partitioner = registry.get_or_create_stream_partitioner(
             Uuid::new_v4(),
             0,
+            0,
             mock_exec(15, 10),
             Partitioning::RoundRobinBatch(PARTITIONS),
         )?;
@@ -71,6 +73,7 @@ mod tests {
         let partitioner = registry.get_or_create_stream_partitioner(
             Uuid::new_v4(),
             0,
+            0,
             mock_exec(5, 10),
             Partitioning::RoundRobinBatch(PARTITIONS),
         )?;
@@ -88,6 +91,7 @@ mod tests {
         let registry = StreamPartitionerRegistry::default();
         let partitioner = registry.get_or_create_stream_partitioner(
             Uuid::new_v4(),
+            0,
             0,
             mock_exec(15, 10),
             Partitioning::Hash(vec![col("c0", &test_schema())?], PARTITIONS),
@@ -109,6 +113,7 @@ mod tests {
         let registry = StreamPartitionerRegistry::default();
         let partitioner = registry.get_or_create_stream_partitioner(
             Uuid::new_v4(),
+            0,
             0,
             mock_exec(5, 10),
             Partitioning::Hash(vec![col("c0", &test_schema())?], PARTITIONS),

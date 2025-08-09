@@ -5,7 +5,7 @@ mod tests {
     use datafusion_distributed::test_utils::localhost::start_localhost_context;
     use datafusion_distributed::test_utils::parquet::register_parquet_tables;
     use datafusion_distributed::{
-        assert_snapshot, assign_stages, ArrowFlightReadExec, NoopSessionBuilder,
+        assert_snapshot, assign_stages, assign_urls, ArrowFlightReadExec, NoopSessionBuilder,
     };
     use futures::TryStreamExt;
     use std::error::Error;
@@ -33,7 +33,8 @@ mod tests {
                 Partitioning::RoundRobinBatch(size),
             ));
         }
-        let physical_distributed = assign_stages(physical_distributed, &ctx)?;
+        let physical_distributed = assign_stages(physical_distributed)?;
+        let physical_distributed = assign_urls(physical_distributed, &ctx)?;
         let physical_distributed_str = displayable(physical_distributed.as_ref())
             .indent(true)
             .to_string();
@@ -44,9 +45,9 @@ mod tests {
 
         assert_snapshot!(physical_distributed_str,
             @r"
-        ArrowFlightReadExec: input_tasks=5 hash_expr=[] stage_id=UUID input_stage_id=UUID input_hosts=[http://localhost:50050/, http://localhost:50051/, http://localhost:50053/, http://localhost:50054/, http://localhost:50055/]
-          ArrowFlightReadExec: input_tasks=10 hash_expr=[] stage_id=UUID input_stage_id=UUID input_hosts=[http://localhost:50056/, http://localhost:50057/, http://localhost:50058/, http://localhost:50059/, http://localhost:50050/, http://localhost:50051/, http://localhost:50053/, http://localhost:50054/, http://localhost:50055/, http://localhost:50056/]
-            ArrowFlightReadExec: input_tasks=1 hash_expr=[] stage_id=UUID input_stage_id=UUID input_hosts=[http://localhost:50057/]
+        ArrowFlightReadExec: stage_idx=0 input_stage_idx=1 input_tasks=5
+          ArrowFlightReadExec: stage_idx=1 input_stage_idx=2 input_tasks=10
+            ArrowFlightReadExec: stage_idx=2 input_stage_idx=3 input_tasks=1
               DataSourceExec: file_groups={1 group: [[/testdata/flights-1m.parquet]]}, projection=[FL_DATE, DEP_DELAY, ARR_DELAY, AIR_TIME, DISTANCE, DEP_TIME, ARR_TIME], file_type=parquet
         ",
         );

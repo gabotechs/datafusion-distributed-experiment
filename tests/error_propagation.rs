@@ -13,7 +13,7 @@ mod tests {
     };
     use datafusion_distributed::test_utils::localhost::start_localhost_context;
     use datafusion_distributed::{
-        assign_stages, with_user_codec, ArrowFlightReadExec, SessionBuilder,
+        assign_stages, assign_urls, with_user_codec, ArrowFlightReadExec, SessionBuilder,
     };
     use datafusion_proto::physical_plan::PhysicalExtensionCodec;
     use datafusion_proto::protobuf::proto_error;
@@ -53,7 +53,8 @@ mod tests {
                 Partitioning::RoundRobinBatch(size),
             ));
         }
-        let plan = assign_stages(plan, &ctx)?;
+        let plan = assign_stages(plan)?;
+        let plan = assign_urls(plan, &ctx)?;
         let stream = execute_stream(plan, ctx.task_ctx())?;
 
         let Err(err) = stream.try_collect::<Vec<_>>().await else {

@@ -3,14 +3,22 @@ use uuid::Uuid;
 
 #[derive(Debug, Clone)]
 pub struct StageContext {
-    /// Unique identifier of the Stage.
-    pub id: Uuid,
+    /// Unique identifier of the query.
+    pub query_id: Uuid,
+    /// Unique identifier of the stage in the query.
+    pub idx: usize,
     /// Number of tasks involved in the query.
     pub n_tasks: usize,
+    /// Unique identifiers of the input stages.
+    pub input: Option<InputStage>,
+}
+
+#[derive(Debug, Clone)]
+pub struct InputStage {
     /// Unique identifier of the input Stage.
-    pub input_id: Uuid,
-    /// Urls from which the current stage will need to read data.
-    pub input_urls: Vec<Url>,
+    pub idx: usize,
+    /// Urls of the input tasks
+    pub tasks: Vec<Option<Url>>,
 }
 
 #[derive(Debug, Clone)]

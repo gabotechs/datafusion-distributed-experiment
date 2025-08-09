@@ -8,7 +8,7 @@ use crate::user_provided_codec::get_user_codec;
 use arrow_flight::decode::FlightRecordBatchStream;
 use arrow_flight::error::FlightError;
 use arrow_flight::flight_service_client::FlightServiceClient;
-use datafusion::common::{internal_err, plan_err};
+use datafusion::common::{exec_err, internal_err, plan_err};
 use datafusion::error::DataFusionError;
 use datafusion::execution::{SendableRecordBatchStream, TaskContext};
 use datafusion::physical_expr::{EquivalenceProperties, Partitioning};
@@ -51,31 +51,35 @@ impl DisplayAs for ArrowFlightReadExec {
             Partitioning::UnknownPartitioning(size) => (vec![], size),
         };
 
-        let hash_expr = hash_expr
-            .iter()
-            .map(|e| format!("{e}"))
-            .collect::<Vec<String>>()
-            .join(", ");
+        write!(f, "ArrowFlightReadExec:")?;
 
-        let stage_trail = match &self.stage_context {
-            None => " (Unassigned stage)".to_string(),
-            Some(stage) => format!(
-                " stage_id={} input_stage_id={} input_hosts=[{}]",
-                stage.id,
-                stage.input_id,
+        match &self.stage_context {
+            None => write!(f, " (Unassigned stage)")?,
+            Some(stage) => write!(
+                f,
+                " stage_idx={} input_stage_idx={}",
+                stage.idx,
                 stage
-                    .input_urls
-                    .iter()
-                    .map(|url| url.to_string())
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            ),
+                    .input
+                    .as_ref()
+                    .map(|v| v.idx.to_string())
+                    .unwrap_or("None".to_string()),
+            )?,
         };
 
-        write!(
-            f,
-            "ArrowFlightReadExec: input_tasks={size} hash_expr=[{hash_expr}]{stage_trail}",
-        )
+        write!(f, " input_tasks={size}")?;
+
+        if !hash_expr.is_empty() {
+            write!(f, " hash_expr=[")?;
+            for (i, expr) in hash_expr.iter().enumerate() {
+                if i > 0 {
+                    write!(f, ", ")?;
+                }
+                write!(f, "{expr}")?;
+            }
+            write!(f, "]")?;
+        }
+        Ok(())
     }
 }
 
@@ -130,18 +134,26 @@ impl ExecutionPlan for ArrowFlightReadExec {
             Partitioning::Hash(hash_expr, _) => hash_expr.clone(),
             _ => vec![],
         };
+        let Some(input_stage) = stage.input else {
+            return plan_err!("No input stage assigned to this ArrowFlightReadExec");
+        };
 
         let stream = async move {
-            if partition >= stage.input_urls.len() {
+            if partition >= input_stage.tasks.len() {
                 return internal_err!(
                     "Invalid partition {partition} for a stage with only {} inputs",
-                    stage.input_urls.len()
+                    input_stage.tasks.len()
                 );
             }
 
-            let channel = channel_manager
-                .get_channel_for_url(&stage.input_urls[partition])
-                .await?;
+            let Some(ref url) = input_stage.tasks[partition] else {
+                return exec_err!(
+                    "Task {partition} from input stage {} does not have a URL assigned",
+                    input_stage.idx
+                );
+            };
+
+            let channel = channel_manager.get_channel_for_url(url).await?;
 
             let mut codec = ComposedPhysicalExtensionCodec::default();
             codec.push(ArrowFlightReadExecProtoCodec);
@@ -151,7 +163,8 @@ impl ExecutionPlan for ArrowFlightReadExec {
 
             let ticket = DoGet::new_remote_plan_exec_ticket(
                 plan,
-                stage.input_id,
+                stage.query_id,
+                input_stage.idx,
                 partition,
                 task_context.as_ref().map(|v| v.task_idx).unwrap_or(0),
                 stage.n_tasks,

@@ -1,4 +1,4 @@
-use crate::context::StageContext;
+use crate::context::{InputStage, StageContext};
 use crate::plan::arrow_flight_read::ArrowFlightReadExec;
 use datafusion::error::DataFusionError;
 use datafusion::execution::FunctionRegistry;
@@ -52,21 +52,14 @@ impl PhysicalExtensionCodec for ArrowFlightReadExecProtoCodec {
         };
         let mut node = ArrowFlightReadExec::new(inputs[0].clone(), partitioning);
 
-        fn parse_uuid(uuid: &str) -> Result<Uuid, DataFusionError> {
-            uuid.parse::<Uuid>()
-                .map_err(|err| proto_error(format!("{err}")))
-        }
-
         node.stage_context = Some(StageContext {
-            id: parse_uuid(&stage_context.id)?,
+            query_id: parse_uuid(&stage_context.query_id)?,
+            idx: stage_context.idx as usize,
             n_tasks: stage_context.n_tasks as usize,
-            input_id: parse_uuid(&stage_context.input_id)?,
-            input_urls: stage_context
-                .input_urls
-                .iter()
-                .map(|url| Url::parse(url))
-                .collect::<Result<Vec<_>, _>>()
-                .map_err(|err| proto_error(format!("{err}")))?,
+            input: match stage_context.input {
+                None => None,
+                Some(v) => Some(v.to_input_stage()?),
+            },
         });
 
         Ok(Arc::new(node))
@@ -95,14 +88,13 @@ impl PhysicalExtensionCodec for ArrowFlightReadExecProtoCodec {
                 &DefaultPhysicalExtensionCodec {},
             )?),
             stage_context: Some(StageContextProto {
-                id: stage_context.id.to_string(),
+                query_id: stage_context.query_id.to_string(),
+                idx: stage_context.idx as u64,
                 n_tasks: stage_context.n_tasks as u64,
-                input_id: stage_context.input_id.to_string(),
-                input_urls: stage_context
-                    .input_urls
-                    .iter()
-                    .map(|url| url.to_string())
-                    .collect(),
+                input: match &stage_context.input {
+                    None => None,
+                    Some(v) => Some(InputStageProto::from_input_stage(v)?),
+                },
             }),
         }
         .encode(buf)
@@ -124,11 +116,60 @@ pub struct ArrowFlightReadExecProto {
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct StageContextProto {
     #[prost(string, tag = "1")]
-    pub id: String,
+    pub query_id: String,
     #[prost(uint64, tag = "2")]
+    pub idx: u64,
+    #[prost(uint64, tag = "3")]
     pub n_tasks: u64,
-    #[prost(string, tag = "3")]
-    pub input_id: String,
-    #[prost(string, repeated, tag = "4")]
-    pub input_urls: Vec<String>,
+    #[prost(message, tag = "4")]
+    pub input: Option<InputStageProto>,
+}
+
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct InputStageProto {
+    #[prost(uint64, tag = "1")]
+    pub idx: u64,
+    #[prost(string, repeated, tag = "2")]
+    pub tasks: Vec<String>,
+}
+
+impl InputStageProto {
+    fn to_input_stage(&self) -> Result<InputStage, DataFusionError> {
+        let tasks = self
+            .tasks
+            .iter()
+            .map(|v| Ok(Some(Url::parse(v)?)))
+            .collect::<Result<Vec<_>, url::ParseError>>()
+            .map_err(|err| proto_error(format!("{err}")))?;
+
+        Ok(InputStage {
+            idx: self.idx as usize,
+            tasks,
+        })
+    }
+
+    fn from_input_stage(stage: &InputStage) -> Result<Self, DataFusionError> {
+        let tasks = stage
+            .tasks
+            .iter()
+            .map(|v| {
+                let Some(v) = v else {
+                    return Err(proto_error(
+                        "Cannot serialize an input stage with non assigned URLs",
+                    ));
+                };
+                Ok(v.to_string())
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
+        Ok(Self {
+            idx: stage.idx as u64,
+            tasks,
+        })
+    }
+}
+
+fn parse_uuid(uuid: &String) -> Result<Uuid, DataFusionError> {
+    uuid.parse::<Uuid>()
+        .map_err(|err| proto_error(format!("{err}")))
 }

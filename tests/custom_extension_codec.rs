@@ -24,7 +24,8 @@ mod tests {
     };
     use datafusion_distributed::test_utils::localhost::start_localhost_context;
     use datafusion_distributed::{
-        assert_snapshot, assign_stages, with_user_codec, ArrowFlightReadExec, SessionBuilder,
+        assert_snapshot, assign_stages, assign_urls, with_user_codec, ArrowFlightReadExec,
+        SessionBuilder,
     };
     use datafusion_proto::physical_plan::PhysicalExtensionCodec;
     use datafusion_proto::protobuf::proto_error;
@@ -58,14 +59,15 @@ mod tests {
         ");
 
         let distributed_plan = build_plan(true)?;
-        let distributed_plan = assign_stages(distributed_plan, &ctx)?;
+        let distributed_plan = assign_stages(distributed_plan)?;
+        let distributed_plan = assign_urls(distributed_plan, &ctx)?;
 
         assert_snapshot!(displayable(distributed_plan.as_ref()).indent(true).to_string(), @r"
         SortExec: expr=[numbers@0 DESC NULLS LAST], preserve_partitioning=[false]
           RepartitionExec: partitioning=RoundRobinBatch(1), input_partitions=10
-            ArrowFlightReadExec: input_tasks=10 hash_expr=[] stage_id=UUID input_stage_id=UUID input_hosts=[http://localhost:50050/, http://localhost:50051/, http://localhost:50052/, http://localhost:50050/, http://localhost:50051/, http://localhost:50052/, http://localhost:50050/, http://localhost:50051/, http://localhost:50052/, http://localhost:50050/]
+            ArrowFlightReadExec: stage_idx=0 input_stage_idx=1 input_tasks=10
               SortExec: expr=[numbers@0 DESC NULLS LAST], preserve_partitioning=[false]
-                ArrowFlightReadExec: input_tasks=1 hash_expr=[numbers@0] stage_id=UUID input_stage_id=UUID input_hosts=[http://localhost:50051/]
+                ArrowFlightReadExec: stage_idx=1 input_stage_idx=2 input_tasks=1 hash_expr=[numbers@0]
                   FilterExec: numbers@0 > 1
                     Int64ListExec: length=6
         ");

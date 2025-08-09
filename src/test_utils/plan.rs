@@ -4,6 +4,7 @@ use datafusion::common::tree_node::{Transformed, TreeNode};
 use datafusion::error::DataFusionError;
 use datafusion::physical_expr::Partitioning;
 use datafusion::physical_plan::aggregates::{AggregateExec, AggregateMode};
+use datafusion::physical_plan::repartition::RepartitionExec;
 use datafusion::physical_plan::ExecutionPlan;
 use std::sync::Arc;
 
@@ -60,6 +61,26 @@ pub fn distribute_aggregate(
                 Ok(Transformed::yes(node))
             }
         }
+    })?;
+
+    Ok(transformed.data)
+}
+
+pub fn distribute_repartitions(
+    plan: Arc<dyn ExecutionPlan>,
+) -> Result<Arc<dyn ExecutionPlan>, DataFusionError> {
+    let transformed = plan.transform_up(|node| {
+        let Some(node) = node.as_any().downcast_ref::<RepartitionExec>() else {
+            return Ok(Transformed::no(node));
+        };
+        let Some(child) = node.children().first().cloned() else {
+            return plan_err!("Repartition must have exactly one child");
+        };
+
+        Ok(Transformed::yes(Arc::new(ArrowFlightReadExec::new(
+            Arc::clone(child),
+            node.partitioning().clone(),
+        ))))
     })?;
 
     Ok(transformed.data)

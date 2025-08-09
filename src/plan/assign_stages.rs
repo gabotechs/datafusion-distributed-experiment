@@ -1,73 +1,100 @@
-use crate::context::StageContext;
+use crate::context::{InputStage, StageContext};
 use crate::{ArrowFlightReadExec, ChannelManager};
-use datafusion::common::tree_node::{Transformed, TreeNode};
+use datafusion::common::internal_datafusion_err;
+use datafusion::common::tree_node::{Transformed, TreeNode, TreeNodeRecursion};
 use datafusion::error::DataFusionError;
 use datafusion::physical_plan::ExecutionPlan;
-use std::cell::RefCell;
+use std::ops::AddAssign;
 use std::sync::Arc;
 use uuid::Uuid;
 
 pub fn assign_stages(
     plan: Arc<dyn ExecutionPlan>,
+) -> Result<Arc<dyn ExecutionPlan>, DataFusionError> {
+    Ok(_assign_stages_inner(plan, Uuid::new_v4(), &mut 0, 1)?.0)
+}
+
+fn _assign_stages_inner(
+    plan: Arc<dyn ExecutionPlan>,
+    query_id: Uuid,
+    idx: &mut usize,
+    n_tasks: usize,
+) -> Result<(Arc<dyn ExecutionPlan>, usize), DataFusionError> {
+    let stage = StageContext {
+        query_id,
+        idx: fetch_add(idx),
+        n_tasks,
+        input: None,
+    };
+
+    let transformed = plan.transform_down(|plan| {
+        let Some(node) = plan.as_any().downcast_ref::<ArrowFlightReadExec>() else {
+            return Ok(Transformed::no(plan));
+        };
+        let child = Arc::clone(node.children().first().cloned().ok_or(
+            internal_datafusion_err!("Expected ArrowFlightExecRead to have a child"),
+        )?);
+
+        let input_n_tasks = node.properties().partitioning.partition_count();
+        let (child, input_stage_idx) = _assign_stages_inner(child, query_id, idx, input_n_tasks)?;
+
+        let mut stage = stage.clone();
+        stage.input = Some(InputStage {
+            idx: input_stage_idx,
+            tasks: vec![None; input_n_tasks],
+        });
+        let mut node = node.clone();
+        node.stage_context = Some(stage);
+
+        Ok(Transformed::new(
+            Arc::new(node).with_new_children(vec![child])?,
+            true,
+            TreeNodeRecursion::Jump,
+        ))
+    })?;
+
+    Ok((transformed.data, stage.idx))
+}
+
+fn fetch_add(n: &mut usize) -> usize {
+    let curr = *n;
+    n.add_assign(1);
+    curr
+}
+
+pub fn assign_urls(
+    plan: Arc<dyn ExecutionPlan>,
     channel_manager: impl TryInto<ChannelManager, Error = DataFusionError>,
 ) -> Result<Arc<dyn ExecutionPlan>, DataFusionError> {
-    let stack = RefCell::new(vec![]);
     let mut i = 0;
 
     let urls = channel_manager.try_into()?.get_urls()?;
 
-    Ok(plan
-        .transform_down_up(
-            |plan| {
-                let Some(node) = plan.as_any().downcast_ref::<ArrowFlightReadExec>() else {
-                    return Ok(Transformed::no(plan));
-                };
+    let transformed = plan.transform_down(|plan| {
+        let Some(node) = plan.as_any().downcast_ref::<ArrowFlightReadExec>() else {
+            return Ok(Transformed::no(plan));
+        };
 
-                // If the current ArrowFlightReadExec already has a task assigned, do nothing.
-                if let Some(ref stage_context) = node.stage_context {
-                    stack.borrow_mut().push(stage_context.clone());
-                    return Ok(Transformed::no(plan.clone()));
-                }
+        let Some(ref ctx) = node.stage_context else {
+            return Ok(Transformed::no(plan));
+        };
 
-                let mut input_urls = vec![];
-                for _ in 0..node.properties().output_partitioning().partition_count() {
-                    // Just round-robin the workers for assigning tasks.
-                    input_urls.push(urls[i % urls.len()].clone());
-                    i += 1;
-                }
+        let mut ctx = ctx.clone();
 
-                let stage_context = if let Some(prev_stage) = stack.borrow().last() {
-                    StageContext {
-                        id: prev_stage.input_id,
-                        n_tasks: prev_stage.input_urls.len(),
-                        input_id: Uuid::new_v4(),
-                        input_urls,
-                    }
-                } else {
-                    // This is the first ArrowFlightReadExec encountered in the plan, that's
-                    // why there is no stage yet.
-                    //
-                    // As this task will not need to fan out data to upper stages, it does not
-                    // care about output tasks.
-                    StageContext {
-                        id: Uuid::new_v4(),
-                        n_tasks: 1,
-                        input_id: Uuid::new_v4(),
-                        input_urls,
-                    }
-                };
+        let Some(ref mut input) = ctx.input else {
+            return Ok(Transformed::no(plan));
+        };
 
-                stack.borrow_mut().push(stage_context.clone());
-                let mut node = node.clone();
-                node.stage_context = Some(stage_context);
-                Ok(Transformed::yes(Arc::new(node)))
-            },
-            |plan| {
-                if plan.name() == "ArrowFlightReadExec" {
-                    stack.borrow_mut().pop();
-                }
-                Ok(Transformed::no(plan))
-            },
-        )?
-        .data)
+        for task in input.tasks.iter_mut() {
+            // Round-robin
+            *task = Some(urls[i % urls.len()].clone());
+            i += 1;
+        }
+
+        let mut node = node.clone();
+        node.stage_context = Some(ctx);
+        Ok(Transformed::yes(Arc::new(node)))
+    })?;
+
+    Ok(transformed.data)
 }

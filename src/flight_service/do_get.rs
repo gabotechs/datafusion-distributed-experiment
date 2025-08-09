@@ -41,21 +41,24 @@ pub struct RemotePlanExec {
     #[prost(message, optional, boxed, tag = "1")]
     pub plan: Option<Box<PhysicalPlanNode>>,
     #[prost(string, tag = "2")]
-    pub stage_id: String,
+    pub query_id: String,
     #[prost(uint64, tag = "3")]
-    pub task_idx: u64,
+    pub stage_idx: u64,
     #[prost(uint64, tag = "4")]
-    pub output_task_idx: u64,
+    pub task_idx: u64,
     #[prost(uint64, tag = "5")]
+    pub output_task_idx: u64,
+    #[prost(uint64, tag = "6")]
     pub output_tasks: u64,
-    #[prost(message, repeated, tag = "6")]
+    #[prost(message, repeated, tag = "7")]
     pub hash_expr: Vec<PhysicalExprNode>,
 }
 
 impl DoGet {
     pub fn new_remote_plan_exec_ticket(
         plan: Arc<dyn ExecutionPlan>,
-        stage_id: Uuid,
+        query_id: Uuid,
+        stage_idx: usize,
         task_idx: usize,
         output_task_idx: usize,
         output_tasks: usize,
@@ -66,7 +69,8 @@ impl DoGet {
         let do_get = Self {
             inner: Some(DoGetInner::RemotePlanExec(RemotePlanExec {
                 plan: Some(Box::new(node)),
-                stage_id: stage_id.to_string(),
+                query_id: query_id.to_string(),
+                stage_idx: stage_idx as u64,
                 task_idx: task_idx as u64,
                 output_task_idx: output_task_idx as u64,
                 output_tasks: output_tasks as u64,
@@ -126,13 +130,14 @@ impl ArrowFlightEndpoint {
             .try_into_physical_plan(function_registry, &self.runtime, &codec)
             .map_err(|err| Status::internal(format!("Cannot deserialize plan: {err}")))?;
 
-        let stage_id = Uuid::parse_str(&action.stage_id).map_err(|err| {
+        let query_id = Uuid::parse_str(&action.query_id).map_err(|err| {
             Status::invalid_argument(format!(
                 "Cannot parse stage id '{}': {err}",
-                action.stage_id
+                action.query_id
             ))
         })?;
 
+        let stage_idx = action.stage_idx as usize;
         let task_idx = action.task_idx as usize;
         let caller_actor_idx = action.output_task_idx as usize;
         let prev_n = action.output_tasks as usize;
@@ -153,7 +158,7 @@ impl ArrowFlightEndpoint {
 
         let stream_partitioner = self
             .partitioner_registry
-            .get_or_create_stream_partitioner(stage_id, task_idx, plan, partitioning)
+            .get_or_create_stream_partitioner(query_id, stage_idx, task_idx, plan, partitioning)
             .map_err(|err| datafusion_error_to_tonic_status(&err))?;
 
         let session_context = SessionContext::new_with_state(state);

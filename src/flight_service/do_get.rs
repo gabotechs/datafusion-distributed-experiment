@@ -3,6 +3,7 @@ use crate::context::StageTaskContext;
 use crate::errors::datafusion_error_to_tonic_status;
 use crate::flight_service::service::ArrowFlightEndpoint;
 use crate::plan::ArrowFlightReadExecProtoCodec;
+use crate::user_provided_codec::get_user_codec;
 use arrow_flight::encode::FlightDataEncoderBuilder;
 use arrow_flight::error::FlightError;
 use arrow_flight::flight_service_server::FlightService;
@@ -107,7 +108,9 @@ impl ArrowFlightEndpoint {
 
         let mut codec = ComposedPhysicalExtensionCodec::default();
         codec.push(ArrowFlightReadExecProtoCodec);
-        codec.push_from_config(state.config());
+        if let Some(user_codec) = get_user_codec(state.config()) {
+            codec.push_arc(user_codec);
+        }
 
         let plan = plan_proto
             .try_into_physical_plan(function_registry, &self.runtime, &codec)

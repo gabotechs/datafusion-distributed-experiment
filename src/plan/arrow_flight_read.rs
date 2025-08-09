@@ -4,6 +4,7 @@ use crate::context::{StageContext, StageTaskContext};
 use crate::errors::tonic_status_to_datafusion_error;
 use crate::flight_service::DoGet;
 use crate::plan::arrow_flight_read_proto::ArrowFlightReadExecProtoCodec;
+use crate::user_provided_codec::get_user_codec;
 use arrow_flight::decode::FlightRecordBatchStream;
 use arrow_flight::error::FlightError;
 use arrow_flight::flight_service_client::FlightServiceClient;
@@ -144,7 +145,9 @@ impl ExecutionPlan for ArrowFlightReadExec {
 
             let mut codec = ComposedPhysicalExtensionCodec::default();
             codec.push(ArrowFlightReadExecProtoCodec);
-            codec.push_from_config(context.session_config());
+            if let Some(user_codec) = get_user_codec(context.session_config()) {
+                codec.push_arc(user_codec);
+            }
 
             let ticket = DoGet::new_remote_plan_exec_ticket(
                 plan,

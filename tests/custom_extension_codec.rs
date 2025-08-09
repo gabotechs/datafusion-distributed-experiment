@@ -24,7 +24,8 @@ mod tests {
     };
     use datafusion_distributed::test_utils::localhost::start_localhost_context;
     use datafusion_distributed::{
-        assert_snapshot, assign_stages, ArrowFlightReadExec, SessionBuilder,
+        add_user_codec, assert_snapshot, assign_stages, with_user_codec, ArrowFlightReadExec,
+        SessionBuilder,
     };
     use datafusion_proto::physical_plan::PhysicalExtensionCodec;
     use datafusion_proto::protobuf::proto_error;
@@ -39,22 +40,14 @@ mod tests {
         #[derive(Clone)]
         struct CustomSessionBuilder;
         impl SessionBuilder for CustomSessionBuilder {
-            fn on_new_session(&self, mut builder: SessionStateBuilder) -> SessionStateBuilder {
-                let codec: Arc<dyn PhysicalExtensionCodec> = Arc::new(Int64ListExecCodec);
-                let config = builder.config().get_or_insert_default();
-                config.set_extension(Arc::new(codec));
-                builder
+            fn on_new_session(&self, builder: SessionStateBuilder) -> SessionStateBuilder {
+                with_user_codec(builder, Int64ListExecCodec)
             }
         }
 
-        let (ctx, _guard) =
+        let (mut ctx, _guard) =
             start_localhost_context([50050, 50051, 50052], CustomSessionBuilder).await;
-
-        let codec: Arc<dyn PhysicalExtensionCodec> = Arc::new(Int64ListExecCodec);
-        ctx.state_ref()
-            .write()
-            .config_mut()
-            .set_extension(Arc::new(codec));
+        add_user_codec(&mut ctx, Int64ListExecCodec);
 
         let single_node_plan = build_plan(false)?;
         assert_snapshot!(displayable(single_node_plan.as_ref()).indent(true).to_string(), @r"

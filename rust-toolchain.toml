@@ -1,0 +1,3 @@
+[toolchain]
+channel = "1.85.1" # MSVR for datafusion = "49.0.0"
+profile = "default"

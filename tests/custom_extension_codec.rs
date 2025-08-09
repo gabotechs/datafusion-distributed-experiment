@@ -133,7 +133,7 @@ mod tests {
             LexOrdering::new(vec![PhysicalSortExpr::new(
                 col("numbers", &plan.schema())?,
                 SortOptions::new(true, false),
-            )]),
+            )]).unwrap(),
             plan,
         ));
 
@@ -152,7 +152,8 @@ mod tests {
                 LexOrdering::new(vec![PhysicalSortExpr::new(
                     col("numbers", &plan.schema())?,
                     SortOptions::new(true, false),
-                )]),
+                )])
+                .unwrap(),
                 plan,
             ));
         }

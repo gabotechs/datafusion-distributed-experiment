@@ -43,7 +43,8 @@ use datafusion::prelude::*;
 
 use crate::util::{print_memory_stats, BenchmarkRun, CommonOpt, QueryResult};
 use datafusion_distributed::test_utils::localhost::start_localhost_context;
-use datafusion_distributed::SessionBuilder;
+use datafusion_distributed::test_utils::plan::distribute_repartitions;
+use datafusion_distributed::{assign_stages, assign_urls, SessionBuilder};
 use log::info;
 use structopt::StructOpt;
 
@@ -99,6 +100,10 @@ pub struct RunOpt {
     /// The tables should have been created with the `--sort` option for this to have any effect.
     #[structopt(short = "t", long = "sorted")]
     sorted: bool,
+
+    /// Run in distributed mode
+    #[structopt(long = "distributed")]
+    distributed: bool,
 }
 
 #[async_trait]
@@ -245,7 +250,13 @@ impl RunOpt {
         if debug {
             println!("=== Optimized logical plan ===\n{plan}\n");
         }
-        let physical_plan = state.create_physical_plan(&plan).await?;
+        let mut physical_plan = state.create_physical_plan(&plan).await?;
+        if self.distributed {
+            physical_plan = distribute_repartitions(physical_plan)?;
+            physical_plan = assign_stages(physical_plan)?;
+            physical_plan = assign_urls(physical_plan, ctx)?;
+        };
+
         if debug {
             println!(
                 "=== Physical plan ===\n{}\n",

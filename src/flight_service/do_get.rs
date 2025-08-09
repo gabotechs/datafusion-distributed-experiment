@@ -139,7 +139,7 @@ impl ArrowFlightEndpoint {
 
         let stage_idx = action.stage_idx as usize;
         let task_idx = action.task_idx as usize;
-        let caller_actor_idx = action.output_task_idx as usize;
+        let output_task_idx = action.output_task_idx as usize;
         let prev_n = action.output_tasks as usize;
         let partitioning = match parse_physical_exprs(
             &action.hash_expr,
@@ -169,7 +169,7 @@ impl ArrowFlightEndpoint {
             .map_err(|err| datafusion_error_to_tonic_status(&err))?;
 
         let stream = stream_partitioner
-            .execute(caller_actor_idx, session_context.task_ctx())
+            .execute(output_task_idx, session_context.task_ctx())
             .map_err(|err| datafusion_error_to_tonic_status(&err))?;
 
         let flight_data_stream = FlightDataEncoderBuilder::new()

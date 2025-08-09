@@ -16,28 +16,24 @@ mod tests {
         register_parquet_tables(&ctx).await?;
 
         let query = r#"
-        WITH a AS (
+        WITH temp_by_dir AS (
             SELECT
-                AVG("MinTemp") as "MinTemp",
-                "RainTomorrow"
+                "WindGustDir",
+                AVG("MaxTemp") AS avg_max_temp
             FROM weather
-            WHERE "RainToday" = 'yes'
-            GROUP BY "RainTomorrow"
-        ), b AS (
-            SELECT
-                AVG("MaxTemp") as "MaxTemp",
-                "RainTomorrow"
-            FROM weather
-            WHERE "RainToday" = 'no'
-            GROUP BY "RainTomorrow"
+            WHERE "MaxTemp" IS NOT NULL
+            GROUP BY "WindGustDir"
         )
         SELECT
-            a."MinTemp",
-            b."MaxTemp"
-        FROM a
-        LEFT JOIN b
-        ON a."RainTomorrow" = b."RainTomorrow"
-
+            t."WindGustDir",
+            t.avg_max_temp,
+            COUNT(*) AS days_count
+        FROM temp_by_dir t
+        JOIN weather w
+          ON w."WindGustDir" = t."WindGustDir"
+        WHERE w."Humidity3pm" IS NOT NULL
+        GROUP BY t."WindGustDir", t.avg_max_temp
+        ORDER BY days_count DESC;
         "#;
 
         let df = ctx.sql(query).await?;
@@ -54,55 +50,63 @@ mod tests {
 
         assert_snapshot!(physical_str,
             @r"
-        CoalesceBatchesExec: target_batch_size=8192
-          HashJoinExec: mode=CollectLeft, join_type=Left, on=[(RainTomorrow@1, RainTomorrow@1)], projection=[MinTemp@0, MaxTemp@2]
-            CoalescePartitionsExec
-              ProjectionExec: expr=[avg(weather.MinTemp)@1 as MinTemp, RainTomorrow@0 as RainTomorrow]
-                AggregateExec: mode=FinalPartitioned, gby=[RainTomorrow@0 as RainTomorrow], aggr=[avg(weather.MinTemp)]
-                  CoalesceBatchesExec: target_batch_size=8192
-                    RepartitionExec: partitioning=Hash([RainTomorrow@0], 3), input_partitions=3
-                      AggregateExec: mode=Partial, gby=[RainTomorrow@1 as RainTomorrow], aggr=[avg(weather.MinTemp)]
-                        CoalesceBatchesExec: target_batch_size=8192
-                          FilterExec: RainToday@1 = yes, projection=[MinTemp@0, RainTomorrow@2]
-                            RepartitionExec: partitioning=RoundRobinBatch(3), input_partitions=1
-                              DataSourceExec: file_groups={1 group: [[/testdata/weather.parquet]]}, projection=[MinTemp, RainToday, RainTomorrow], file_type=parquet, predicate=RainToday@1 = yes, pruning_predicate=RainToday_null_count@2 != row_count@3 AND RainToday_min@0 <= yes AND yes <= RainToday_max@1, required_guarantees=[RainToday in (yes)]
-
-            ProjectionExec: expr=[avg(weather.MaxTemp)@1 as MaxTemp, RainTomorrow@0 as RainTomorrow]
-              AggregateExec: mode=FinalPartitioned, gby=[RainTomorrow@0 as RainTomorrow], aggr=[avg(weather.MaxTemp)]
+        SortPreservingMergeExec: [days_count@2 DESC]
+          SortExec: expr=[days_count@2 DESC], preserve_partitioning=[true]
+            ProjectionExec: expr=[WindGustDir@0 as WindGustDir, avg_max_temp@1 as avg_max_temp, count(Int64(1))@2 as days_count]
+              AggregateExec: mode=FinalPartitioned, gby=[WindGustDir@0 as WindGustDir, avg_max_temp@1 as avg_max_temp], aggr=[count(Int64(1))]
                 CoalesceBatchesExec: target_batch_size=8192
-                  RepartitionExec: partitioning=Hash([RainTomorrow@0], 3), input_partitions=3
-                    AggregateExec: mode=Partial, gby=[RainTomorrow@1 as RainTomorrow], aggr=[avg(weather.MaxTemp)]
+                  RepartitionExec: partitioning=Hash([WindGustDir@0, avg_max_temp@1], 3), input_partitions=3
+                    AggregateExec: mode=Partial, gby=[WindGustDir@0 as WindGustDir, avg_max_temp@1 as avg_max_temp], aggr=[count(Int64(1))]
                       CoalesceBatchesExec: target_batch_size=8192
-                        FilterExec: RainToday@1 = no, projection=[MaxTemp@0, RainTomorrow@2]
-                          RepartitionExec: partitioning=RoundRobinBatch(3), input_partitions=1
-                            DataSourceExec: file_groups={1 group: [[/testdata/weather.parquet]]}, projection=[MaxTemp, RainToday, RainTomorrow], file_type=parquet, predicate=RainToday@1 = no, pruning_predicate=RainToday_null_count@2 != row_count@3 AND RainToday_min@0 <= no AND no <= RainToday_max@1, required_guarantees=[RainToday in (no)]
+                        HashJoinExec: mode=CollectLeft, join_type=Inner, on=[(WindGustDir@0, WindGustDir@0)], projection=[WindGustDir@0, avg_max_temp@1]
+                          CoalescePartitionsExec
+                            ProjectionExec: expr=[WindGustDir@0 as WindGustDir, avg(weather.MaxTemp)@1 as avg_max_temp]
+                              AggregateExec: mode=FinalPartitioned, gby=[WindGustDir@0 as WindGustDir], aggr=[avg(weather.MaxTemp)]
+                                CoalesceBatchesExec: target_batch_size=8192
+                                  RepartitionExec: partitioning=Hash([WindGustDir@0], 3), input_partitions=3
+                                    AggregateExec: mode=Partial, gby=[WindGustDir@1 as WindGustDir], aggr=[avg(weather.MaxTemp)]
+                                      CoalesceBatchesExec: target_batch_size=8192
+                                        FilterExec: MaxTemp@0 IS NOT NULL
+                                          RepartitionExec: partitioning=RoundRobinBatch(3), input_partitions=1
+                                            DataSourceExec: file_groups={1 group: [[/testdata/weather.parquet]]}, projection=[MaxTemp, WindGustDir], file_type=parquet, predicate=MaxTemp@0 IS NOT NULL, pruning_predicate=MaxTemp_null_count@1 != row_count@0, required_guarantees=[]
+
+                          CoalesceBatchesExec: target_batch_size=8192
+                            FilterExec: Humidity3pm@1 IS NOT NULL, projection=[WindGustDir@0]
+                              RepartitionExec: partitioning=RoundRobinBatch(3), input_partitions=1
+                                DataSourceExec: file_groups={1 group: [[/testdata/weather.parquet]]}, projection=[WindGustDir, Humidity3pm], file_type=parquet, predicate=Humidity3pm@1 IS NOT NULL, pruning_predicate=Humidity3pm_null_count@1 != row_count@0, required_guarantees=[]
         ",
         );
 
         assert_snapshot!(physical_distributed_str,
             @r"
-        CoalesceBatchesExec: target_batch_size=8192
-          HashJoinExec: mode=CollectLeft, join_type=Left, on=[(RainTomorrow@1, RainTomorrow@1)], projection=[MinTemp@0, MaxTemp@2]
-            CoalescePartitionsExec
-              ProjectionExec: expr=[avg(weather.MinTemp)@1 as MinTemp, RainTomorrow@0 as RainTomorrow]
-                AggregateExec: mode=FinalPartitioned, gby=[RainTomorrow@0 as RainTomorrow], aggr=[avg(weather.MinTemp)]
-                  CoalesceBatchesExec: target_batch_size=8192
-                    ArrowFlightReadExec: stage_idx=0 input_stage_idx=1 input_tasks=3 hash_expr=[RainTomorrow@0]
-                      AggregateExec: mode=Partial, gby=[RainTomorrow@1 as RainTomorrow], aggr=[avg(weather.MinTemp)]
-                        CoalesceBatchesExec: target_batch_size=8192
-                          FilterExec: RainToday@1 = yes, projection=[MinTemp@0, RainTomorrow@2]
-                            ArrowFlightReadExec: stage_idx=1 input_stage_idx=2 input_tasks=3
-                              DataSourceExec: file_groups={1 group: [[/testdata/weather.parquet]]}, projection=[MinTemp, RainToday, RainTomorrow], file_type=parquet, predicate=RainToday@1 = yes, pruning_predicate=RainToday_null_count@2 != row_count@3 AND RainToday_min@0 <= yes AND yes <= RainToday_max@1, required_guarantees=[RainToday in (yes)]
-
-            ProjectionExec: expr=[avg(weather.MaxTemp)@1 as MaxTemp, RainTomorrow@0 as RainTomorrow]
-              AggregateExec: mode=FinalPartitioned, gby=[RainTomorrow@0 as RainTomorrow], aggr=[avg(weather.MaxTemp)]
+        SortPreservingMergeExec: [days_count@2 DESC]
+          SortExec: expr=[days_count@2 DESC], preserve_partitioning=[true]
+            ProjectionExec: expr=[WindGustDir@0 as WindGustDir, avg_max_temp@1 as avg_max_temp, count(Int64(1))@2 as days_count]
+              AggregateExec: mode=FinalPartitioned, gby=[WindGustDir@0 as WindGustDir, avg_max_temp@1 as avg_max_temp], aggr=[count(Int64(1))]
                 CoalesceBatchesExec: target_batch_size=8192
-                  ArrowFlightReadExec: stage_idx=0 input_stage_idx=3 input_tasks=3 hash_expr=[RainTomorrow@0]
-                    AggregateExec: mode=Partial, gby=[RainTomorrow@1 as RainTomorrow], aggr=[avg(weather.MaxTemp)]
-                      CoalesceBatchesExec: target_batch_size=8192
-                        FilterExec: RainToday@1 = no, projection=[MaxTemp@0, RainTomorrow@2]
-                          ArrowFlightReadExec: stage_idx=3 input_stage_idx=4 input_tasks=3
-                            DataSourceExec: file_groups={1 group: [[/testdata/weather.parquet]]}, projection=[MaxTemp, RainToday, RainTomorrow], file_type=parquet, predicate=RainToday@1 = no, pruning_predicate=RainToday_null_count@2 != row_count@3 AND RainToday_min@0 <= no AND no <= RainToday_max@1, required_guarantees=[RainToday in (no)]
+                  RepartitionExec: partitioning=Hash([WindGustDir@0, avg_max_temp@1], 3), input_partitions=3
+                    ArrowFlightReadExec: stage_idx=0 input_stage_idx=1 input_tasks=3 hash_expr=[WindGustDir@0, avg_max_temp@1]
+                      AggregateExec: mode=Partial, gby=[WindGustDir@0 as WindGustDir, avg_max_temp@1 as avg_max_temp], aggr=[count(Int64(1))]
+                        CoalesceBatchesExec: target_batch_size=8192
+                          HashJoinExec: mode=CollectLeft, join_type=Inner, on=[(WindGustDir@0, WindGustDir@0)], projection=[WindGustDir@0, avg_max_temp@1]
+                            CoalescePartitionsExec
+                              ProjectionExec: expr=[WindGustDir@0 as WindGustDir, avg(weather.MaxTemp)@1 as avg_max_temp]
+                                AggregateExec: mode=FinalPartitioned, gby=[WindGustDir@0 as WindGustDir], aggr=[avg(weather.MaxTemp)]
+                                  CoalesceBatchesExec: target_batch_size=8192
+                                    RepartitionExec: partitioning=Hash([WindGustDir@0], 3), input_partitions=3
+                                      ArrowFlightReadExec: stage_idx=1 input_stage_idx=2 input_tasks=3 hash_expr=[WindGustDir@0]
+                                        AggregateExec: mode=Partial, gby=[WindGustDir@1 as WindGustDir], aggr=[avg(weather.MaxTemp)]
+                                          CoalesceBatchesExec: target_batch_size=8192
+                                            FilterExec: MaxTemp@0 IS NOT NULL
+                                              RepartitionExec: partitioning=RoundRobinBatch(3), input_partitions=1
+                                                ArrowFlightReadExec: stage_idx=2 input_stage_idx=3 input_tasks=1
+                                                  DataSourceExec: file_groups={1 group: [[/testdata/weather.parquet]]}, projection=[MaxTemp, WindGustDir], file_type=parquet, predicate=MaxTemp@0 IS NOT NULL, pruning_predicate=MaxTemp_null_count@1 != row_count@0, required_guarantees=[]
+
+                            CoalesceBatchesExec: target_batch_size=8192
+                              FilterExec: Humidity3pm@1 IS NOT NULL, projection=[WindGustDir@0]
+                                RepartitionExec: partitioning=RoundRobinBatch(3), input_partitions=1
+                                  ArrowFlightReadExec: stage_idx=1 input_stage_idx=4 input_tasks=1
+                                    DataSourceExec: file_groups={1 group: [[/testdata/weather.parquet]]}, projection=[WindGustDir, Humidity3pm], file_type=parquet, predicate=Humidity3pm@1 IS NOT NULL, pruning_predicate=Humidity3pm_null_count@1 != row_count@0, required_guarantees=[]
         ",
         );
 
@@ -113,8 +117,27 @@ mod tests {
         )?;
 
         assert_snapshot!(batches, @r"
-        ++
-        ++
+        +-------------+--------------------+------------+
+        | WindGustDir | avg_max_temp       | days_count |
+        +-------------+--------------------+------------+
+        | NW          | 19.47808219178083  | 73         |
+        | NNW         | 20.459090909090914 | 44         |
+        | E           | 24.086486486486482 | 37         |
+        | WNW         | 17.53714285714286  | 35         |
+        | ENE         | 23.333333333333336 | 30         |
+        | ESE         | 20.82173913043478  | 23         |
+        | S           | 17.013636363636365 | 22         |
+        | N           | 18.538095238095238 | 21         |
+        | W           | 19.509999999999998 | 20         |
+        | NE          | 25.89375           | 16         |
+        | SSE         | 18.749999999999996 | 12         |
+        | SE          | 18.491666666666667 | 12         |
+        | NNE         | 23.7375            | 8          |
+        | SSW         | 23.4               | 5          |
+        | NA          | 16.46666666666667  | 3          |
+        | SW          | 27.0               | 3          |
+        | WSW         | 31.55              | 2          |
+        +-------------+--------------------+------------+
         ");
 
         let batches_distributed = pretty_format_batches(
@@ -123,8 +146,27 @@ mod tests {
                 .await?,
         )?;
         assert_snapshot!(batches_distributed, @r"
-        ++
-        ++
+        +-------------+--------------------+------------+
+        | WindGustDir | avg_max_temp       | days_count |
+        +-------------+--------------------+------------+
+        | NW          | 19.47808219178083  | 73         |
+        | NNW         | 20.459090909090914 | 44         |
+        | E           | 24.086486486486482 | 37         |
+        | WNW         | 17.53714285714286  | 35         |
+        | ENE         | 23.333333333333336 | 30         |
+        | ESE         | 20.82173913043478  | 23         |
+        | S           | 17.013636363636365 | 22         |
+        | N           | 18.538095238095238 | 21         |
+        | W           | 19.509999999999998 | 20         |
+        | NE          | 25.89375           | 16         |
+        | SSE         | 18.749999999999996 | 12         |
+        | SE          | 18.491666666666667 | 12         |
+        | NNE         | 23.7375            | 8          |
+        | SSW         | 23.4               | 5          |
+        | NA          | 16.46666666666667  | 3          |
+        | SW          | 27.0               | 3          |
+        | WSW         | 31.55              | 2          |
+        +-------------+--------------------+------------+
         ");
 
         Ok(())

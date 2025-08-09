@@ -161,12 +161,18 @@ impl ExecutionPlan for ArrowFlightReadExec {
                 codec.push_arc(user_codec);
             }
 
+            let target_task_idx = partition;
+            let curr_task_idx = match &task_context {
+                None => 0, // we are not in an ArrowFlightEndpoint
+                Some(task_context) => task_context.task_idx,
+            };
+
             let ticket = DoGet::new_remote_plan_exec_ticket(
                 plan,
                 stage.query_id,
                 input_stage.idx,
-                partition,
-                task_context.as_ref().map(|v| v.task_idx).unwrap_or(0),
+                target_task_idx,
+                curr_task_idx,
                 stage.n_tasks,
                 &hash_expr,
                 &codec,

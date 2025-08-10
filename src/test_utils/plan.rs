@@ -70,6 +70,13 @@ pub fn distribute_repartitions(
     plan: Arc<dyn ExecutionPlan>,
 ) -> Result<Arc<dyn ExecutionPlan>, DataFusionError> {
     let transformed = plan.transform_up(|node| {
+        if node.children().is_empty() {
+            return Ok(Transformed::yes(Arc::new(ArrowFlightReadExec::new(
+                node,
+                Partitioning::RoundRobinBatch(1),
+            ))));
+        }
+
         let Some(repartition_exec) = node.as_any().downcast_ref::<RepartitionExec>() else {
             return Ok(Transformed::no(node));
         };
@@ -82,18 +89,16 @@ pub fn distribute_repartitions(
             .partitioning
             .partition_count();
 
-        let arrow_flight_exec = Arc::new(ArrowFlightReadExec::new(
+        let arrow_flight_exec = ArrowFlightReadExec::new(
             Arc::clone(repartition_exec_child),
             match repartition_exec.partitioning() {
                 Partitioning::RoundRobinBatch(_) => Partitioning::RoundRobinBatch(n),
                 Partitioning::Hash(exprs, _) => Partitioning::Hash(exprs.to_vec(), n),
                 Partitioning::UnknownPartitioning(_) => Partitioning::UnknownPartitioning(n),
             },
-        ));
+        );
 
-        let new_node = node.with_new_children(vec![arrow_flight_exec])?;
-
-        Ok(Transformed::yes(new_node))
+        Ok(Transformed::yes(Arc::new(arrow_flight_exec)))
     })?;
 
     Ok(transformed.data)

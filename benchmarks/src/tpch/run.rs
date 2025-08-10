@@ -76,7 +76,7 @@ pub struct RunOpt {
     path: PathBuf,
 
     /// File format: `csv` or `parquet`
-    #[structopt(short = "f", long = "format", default_value = "csv")]
+    #[structopt(short = "f", long = "format", default_value = "parquet")]
     file_format: String,
 
     /// Load the data into a MemTable before executing the query
@@ -102,7 +102,7 @@ pub struct RunOpt {
     sorted: bool,
 
     /// Run in distributed mode
-    #[structopt(long = "distributed")]
+    #[structopt(short = "D", long = "distributed")]
     distributed: bool,
 }
 
@@ -134,7 +134,7 @@ impl SessionBuilder for RunOpt {
 }
 
 impl RunOpt {
-    pub async fn run(self) -> Result<()> {
+    pub async fn run(mut self) -> Result<()> {
         let (ctx, _guard) = start_localhost_context([50051], self.clone()).await;
         println!("Running benchmarks with the following options: {self:?}");
         let query_range = match self.query {
@@ -142,6 +142,8 @@ impl RunOpt {
             None => TPCH_QUERY_START_ID..=TPCH_QUERY_END_ID,
         };
 
+        self.output_path
+            .get_or_insert_with(|| self.path.join("results.json"));
         let mut benchmark_run = BenchmarkRun::new();
 
         for query_id in query_range {
@@ -159,6 +161,7 @@ impl RunOpt {
                 }
             }
         }
+        benchmark_run.compare_with_previous(self.output_path.as_ref())?;
         benchmark_run.maybe_write_json(self.output_path.as_ref())?;
         benchmark_run.maybe_print_failures();
         Ok(())

@@ -5,6 +5,7 @@ use crate::errors::tonic_status_to_datafusion_error;
 use crate::flight_service::DoGet;
 use crate::plan::arrow_flight_read_proto::ArrowFlightReadExecProtoCodec;
 use crate::user_provided_codec::get_user_codec;
+use crate::BoxCloneSyncChannel;
 use arrow_flight::decode::FlightRecordBatchStream;
 use arrow_flight::error::FlightError;
 use arrow_flight::flight_service_client::FlightServiceClient;
@@ -138,6 +139,9 @@ impl ExecutionPlan for ArrowFlightReadExec {
         let Some(input_stage) = stage.input else {
             return plan_err!("No input stage assigned to this ArrowFlightReadExec");
         };
+        let loopback_channel = context
+            .session_config()
+            .get_extension::<BoxCloneSyncChannel>();
 
         let stream = async move {
             if partition >= input_stage.tasks.len() {
@@ -154,7 +158,19 @@ impl ExecutionPlan for ArrowFlightReadExec {
                 );
             };
 
-            let channel = channel_manager.get_channel_for_url(url).await?;
+            let channel = if channel_manager
+                .get_current_url()?
+                .map(|v| &v == url)
+                .unwrap_or(false)
+            {
+                if let Some(loopback_channel) = loopback_channel {
+                    loopback_channel.as_ref().clone()
+                } else {
+                    channel_manager.get_channel_for_url(url).await?
+                }
+            } else {
+                channel_manager.get_channel_for_url(url).await?
+            };
 
             let mut codec = ComposedPhysicalExtensionCodec::default();
             codec.push(ArrowFlightReadExecProtoCodec);

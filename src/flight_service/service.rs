@@ -2,8 +2,8 @@ use crate::channel_manager::ChannelManager;
 use crate::flight_service::session_builder::NoopSessionBuilder;
 use crate::flight_service::stream_partitioner_registry::StreamPartitionerRegistry;
 use crate::flight_service::SessionBuilder;
-use crate::ChannelResolver;
-use arrow_flight::flight_service_server::FlightService;
+use crate::{BoxCloneSyncChannel, ChannelResolver};
+use arrow_flight::flight_service_server::{FlightService, FlightServiceServer};
 use arrow_flight::{
     Action, ActionType, Criteria, Empty, FlightData, FlightDescriptor, FlightInfo,
     HandshakeRequest, HandshakeResponse, PollInfo, PutResult, SchemaResult, Ticket,
@@ -11,15 +11,30 @@ use arrow_flight::{
 use async_trait::async_trait;
 use datafusion::execution::runtime_env::RuntimeEnv;
 use futures::stream::BoxStream;
+use hyper_util::rt::TokioIo;
+use std::cell::RefCell;
+use std::collections::HashMap;
 use std::sync::Arc;
+use tokio::sync::OnceCell;
+use tonic::codegen::tokio_stream;
+use tonic::transport::{Endpoint, Server};
 use tonic::{Request, Response, Status, Streaming};
+use uuid::Uuid;
 
+thread_local! {
+    static LOOPBACK_CHANNEL: RefCell<HashMap<Uuid, BoxCloneSyncChannel>> = RefCell::new(HashMap::new());
+}
+
+#[derive(Clone)]
 pub struct ArrowFlightEndpoint {
     pub(super) channel_manager: Arc<ChannelManager>,
     pub(super) runtime: Arc<RuntimeEnv>,
     pub(super) partitioner_registry: Arc<StreamPartitionerRegistry>,
     pub(super) session_builder: Arc<dyn SessionBuilder + Send + Sync>,
+    pub(super) loopback_channel: Arc<OnceCell<BoxCloneSyncChannel>>,
 }
+
+const DUMMY_URL: &str = "http://[::]:50051";
 
 impl ArrowFlightEndpoint {
     pub fn new(channel_resolver: impl ChannelResolver + Send + Sync + 'static) -> Self {
@@ -28,6 +43,8 @@ impl ArrowFlightEndpoint {
             runtime: Arc::new(RuntimeEnv::default()),
             partitioner_registry: Arc::new(StreamPartitionerRegistry::default()),
             session_builder: Arc::new(NoopSessionBuilder),
+            // dummy placeholder that we are about to populate.
+            loopback_channel: Arc::new(OnceCell::new()),
         }
     }
 
@@ -36,6 +53,37 @@ impl ArrowFlightEndpoint {
         session_builder: impl SessionBuilder + Send + Sync + 'static,
     ) {
         self.session_builder = Arc::new(session_builder);
+    }
+
+    pub async fn loopback_channel(&self) -> BoxCloneSyncChannel {
+        self.loopback_channel
+            .get_or_init(|| self.clone().in_memory())
+            .await
+            .clone()
+    }
+
+    async fn in_memory(self) -> BoxCloneSyncChannel {
+        let (client, server) = tokio::io::duplex(1024 * 1024);
+
+        tokio::spawn(async move {
+            Server::builder()
+                .add_service(FlightServiceServer::new(self))
+                .serve_with_incoming(tokio_stream::once(Ok::<_, std::io::Error>(server)))
+                .await
+        });
+
+        let mut client = Some(client);
+        let channel = Endpoint::try_from(DUMMY_URL)
+            .expect("Invalid dummy URL for building an endpoint. This should never happen")
+            .connect_with_connector(tower::service_fn(move |_| {
+                let client = client
+                    .take()
+                    .expect("Client taken twice. This should never happen");
+                async move { Ok::<_, std::io::Error>(TokioIo::new(client)) }
+            }))
+            .await
+            .expect("Cannot connect with tokio duplex connector. This should never happen");
+        BoxCloneSyncChannel::new(channel)
     }
 }
 

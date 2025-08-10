@@ -228,6 +228,9 @@ impl BenchmarkRun {
             let Some(prev_query) = prev_queries.iter().find(|v| v.query == query.query) else {
                 continue;
             };
+            if prev_query.iterations.is_empty() {
+                continue;
+            }
             if query.iterations.is_empty() {
                 println!("{}: Failed ❌", query.query);
                 continue;

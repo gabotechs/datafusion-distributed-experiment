@@ -31,6 +31,10 @@ pub trait ChannelResolver {
     fn get_urls(&self) -> Result<Vec<Url>, DataFusionError>;
     /// For a given URL, get a channel for communicating to it.
     async fn get_channel_for_url(&self, url: &Url) -> Result<BoxCloneSyncChannel, DataFusionError>;
+    /// Optional. Gets the URL of the current host.
+    fn get_current_url(&self) -> Result<Option<Url>, DataFusionError> {
+        Ok(None)
+    }
 }
 
 impl ChannelManager {
@@ -38,6 +42,7 @@ impl ChannelManager {
         to self.0 {
             pub fn get_urls(&self) -> Result<Vec<Url>, DataFusionError>;
             pub async fn get_channel_for_url(&self, url: &Url) -> Result<BoxCloneSyncChannel, DataFusionError>;
+            pub fn get_current_url(&self) -> Result<Option<Url>, DataFusionError>;
         }
     }
 }

@@ -89,6 +89,14 @@ impl ChannelResolver for LocalHostChannelResolver {
         let channel = endpoint.connect().await.map_err(external_err)?;
         Ok(BoxCloneSyncChannel::new(channel))
     }
+    fn get_current_url(&self) -> Result<Option<Url>, DataFusionError> {
+        let Some(port) = self.ports.first() else {
+            return Ok(None);
+        };
+        Url::parse(&format!("http://localhost:{port}"))
+            .map(Some)
+            .map_err(external_err)
+    }
 }
 
 pub async fn spawn_flight_service(

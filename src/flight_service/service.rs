@@ -13,9 +13,9 @@ use datafusion::execution::runtime_env::RuntimeEnv;
 use futures::stream::BoxStream;
 use hyper_util::rt::TokioIo;
 use std::cell::RefCell;
+use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::OnceCell;
 use tonic::codegen::tokio_stream;
 use tonic::transport::{Endpoint, Server};
 use tonic::{Request, Response, Status, Streaming};
@@ -31,7 +31,7 @@ pub struct ArrowFlightEndpoint {
     pub(super) runtime: Arc<RuntimeEnv>,
     pub(super) partitioner_registry: Arc<StreamPartitionerRegistry>,
     pub(super) session_builder: Arc<dyn SessionBuilder + Send + Sync>,
-    pub(super) loopback_channel: Arc<OnceCell<BoxCloneSyncChannel>>,
+    pub(super) loopback_channel_id: Uuid,
 }
 
 const DUMMY_URL: &str = "http://[::]:50051";
@@ -44,7 +44,7 @@ impl ArrowFlightEndpoint {
             partitioner_registry: Arc::new(StreamPartitionerRegistry::default()),
             session_builder: Arc::new(NoopSessionBuilder),
             // dummy placeholder that we are about to populate.
-            loopback_channel: Arc::new(OnceCell::new()),
+            loopback_channel_id: Uuid::new_v4(),
         }
     }
 
@@ -55,14 +55,18 @@ impl ArrowFlightEndpoint {
         self.session_builder = Arc::new(session_builder);
     }
 
-    pub async fn loopback_channel(&self) -> BoxCloneSyncChannel {
-        self.loopback_channel
-            .get_or_init(|| self.clone().in_memory())
-            .await
-            .clone()
+    pub fn loopback_channel(&self) -> BoxCloneSyncChannel {
+        LOOPBACK_CHANNEL.with_borrow_mut(|chs| match chs.entry(self.loopback_channel_id) {
+            Entry::Occupied(v) => v.get().clone(),
+            Entry::Vacant(empty) => {
+                let new_ch = self.clone().in_memory();
+                empty.insert(new_ch.clone());
+                new_ch
+            }
+        })
     }
 
-    async fn in_memory(self) -> BoxCloneSyncChannel {
+    fn in_memory(self) -> BoxCloneSyncChannel {
         let (client, server) = tokio::io::duplex(1024 * 1024);
 
         tokio::spawn(async move {
@@ -75,14 +79,12 @@ impl ArrowFlightEndpoint {
         let mut client = Some(client);
         let channel = Endpoint::try_from(DUMMY_URL)
             .expect("Invalid dummy URL for building an endpoint. This should never happen")
-            .connect_with_connector(tower::service_fn(move |_| {
+            .connect_with_connector_lazy(tower::service_fn(move |_| {
                 let client = client
                     .take()
                     .expect("Client taken twice. This should never happen");
                 async move { Ok::<_, std::io::Error>(TokioIo::new(client)) }
-            }))
-            .await
-            .expect("Cannot connect with tokio duplex connector. This should never happen");
+            }));
         BoxCloneSyncChannel::new(channel)
     }
 }

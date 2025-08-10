@@ -155,7 +155,7 @@ impl ArrowFlightEndpoint {
         let config = state.config_mut();
         config.set_extension(Arc::clone(&self.channel_manager));
         config.set_extension(Arc::new(StageTaskContext { task_idx }));
-        config.set_extension(Arc::new(self.loopback_channel().await));
+        config.set_extension(Arc::new(self.loopback_channel()));
 
         let stream_partitioner = self
             .partitioner_registry

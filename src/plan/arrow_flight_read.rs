@@ -22,6 +22,8 @@ use std::fmt::Formatter;
 use std::sync::Arc;
 use tonic::IntoRequest;
 
+const MAX_DECODING_SIZE: usize = 6 * 1024 * 1024 * 1024;
+
 #[derive(Debug, Clone)]
 pub struct ArrowFlightReadExec {
     properties: PlanProperties,
@@ -197,6 +199,7 @@ impl ExecutionPlan for ArrowFlightReadExec {
 
             let mut client = FlightServiceClient::new(channel);
             let stream = client
+                .max_decoding_message_size(MAX_DECODING_SIZE)
                 .do_get(ticket.into_request())
                 .await
                 .map_err(|err| {

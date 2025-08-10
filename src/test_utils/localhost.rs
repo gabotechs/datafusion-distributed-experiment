@@ -27,11 +27,18 @@ where
     let ports: Vec<u16> = ports.into_iter().map(|x| x.try_into().unwrap()).collect();
     let channel_resolver = LocalHostChannelResolver::new(ports.clone());
     let mut join_set = JoinSet::new();
+    let mut endpoints = vec![];
     for port in ports {
         let channel_resolver = channel_resolver.clone();
         let session_builder = session_builder.clone();
+
+        let mut endpoint = ArrowFlightEndpoint::new(channel_resolver);
+        endpoint.with_session_builder(session_builder);
+        endpoints.push(endpoint.clone());
         join_set.spawn(async move {
-            spawn_flight_service(channel_resolver, session_builder, port)
+            Server::builder()
+                .add_service(FlightServiceServer::new(endpoint.clone()))
+                .serve(format!("127.0.0.1:{port}").parse().unwrap())
                 .await
                 .unwrap();
         });
@@ -46,7 +53,12 @@ where
     let builder = session_builder.session_state_builder(builder).unwrap();
 
     let state = builder.build();
-    let state = session_builder.session_state(state).await.unwrap();
+    let mut state = session_builder.session_state(state).await.unwrap();
+    if let Some(endpoint) = endpoints.first() {
+        state
+            .config_mut()
+            .set_extension(Arc::new(endpoint.loopback_channel()));
+    }
 
     let ctx = SessionContext::new_with_state(state);
     let ctx = session_builder.session_context(ctx).await.unwrap();
@@ -97,19 +109,6 @@ impl ChannelResolver for LocalHostChannelResolver {
             .map(Some)
             .map_err(external_err)
     }
-}
-
-pub async fn spawn_flight_service(
-    channel_resolver: impl ChannelResolver + Send + Sync + 'static,
-    session_builder: impl SessionBuilder + Send + Sync + 'static,
-    port: u16,
-) -> Result<(), Box<dyn Error + Send + Sync>> {
-    let mut endpoint = ArrowFlightEndpoint::new(channel_resolver);
-    endpoint.with_session_builder(session_builder);
-    Ok(Server::builder()
-        .add_service(FlightServiceServer::new(endpoint))
-        .serve(format!("127.0.0.1:{port}").parse()?)
-        .await?)
 }
 
 fn external_err(err: impl Error + Send + Sync + 'static) -> DataFusionError {

@@ -197,7 +197,7 @@ impl ExecutionPlan for ArrowFlightReadExec {
                 &codec,
             )?;
 
-            let mut client = FlightServiceClient::new(channel);
+            let client = FlightServiceClient::new(channel);
             let stream = client
                 .max_decoding_message_size(MAX_DECODING_SIZE)
                 .do_get(ticket.into_request())

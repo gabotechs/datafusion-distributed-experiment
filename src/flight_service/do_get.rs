@@ -24,6 +24,8 @@ use std::sync::Arc;
 use tonic::{Request, Response, Status};
 use uuid::Uuid;
 
+const MAX_FLIGHT_DATA_SIZE: usize = 6 * 1024 * 1024 * 1024;
+
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct DoGet {
     #[prost(oneof = "DoGetInner", tags = "1")]
@@ -174,6 +176,7 @@ impl ArrowFlightEndpoint {
             .map_err(|err| datafusion_error_to_tonic_status(&err))?;
 
         let flight_data_stream = FlightDataEncoderBuilder::new()
+            .with_max_flight_data_size(MAX_FLIGHT_DATA_SIZE)
             .with_schema(stream_partitioner.schema())
             .build(stream.map_err(|err| {
                 FlightError::Tonic(Box::new(datafusion_error_to_tonic_status(&err)))

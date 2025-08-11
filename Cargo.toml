@@ -29,6 +29,8 @@ delegate = "0.13.4"
 dashmap = "6.1.0"
 prost = "0.13.5"
 object_store = "0.12.3"
+hyper-util = "0.1.16"
+tokio-stream = "0.1.17"
 
 # integration
 insta = { version = "1.43.1", features = ["filters"], optional = true }
